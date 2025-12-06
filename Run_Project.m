@@ -5,228 +5,261 @@ clc
 addpath('./Functions')
 addpath('./Data')
 
-%% Read Prices
-table_prices = readtable('asset_prices.csv');
-mapping_table = readtable('mapping_table.csv');
-capitalization_weights = readtable('capitalization_weights.csv');
+%% ====================== 1. Data Import and Preprocessing ======================
 
-%% Transform prices from table to timetable
-dt = table_prices(:,1).Variables;
-values = table_prices(:,2:end).Variables;
-nm = table_prices.Properties.VariableNames(2:end);
+% Read input data
+table_prices           = readtable('asset_prices.csv');
+mapping_table          = readtable('mapping_table.csv');
+capitalization_weights = readtable('capitalization_weights.csv'); 
 
-myPrice_dt = array2timetable(values, 'RowTimes', dt, 'VariableNames', nm); 
+% Transform prices from table to timetable
+dt     = table_prices{:,1};
+values = table_prices{:,2:end};
+nm     = table_prices.Properties.VariableNames(2:end);  % asset names
 
-%% Selection of a subset of Dates
-[prices_val, ~] = selectPriceRange(myPrice_dt, '01/01/2018', '31/12/2022');
+myPrice_dt = array2timetable(values, 'RowTimes', dt, 'VariableNames', nm);
 
-%% Calculate returns
+% Select in-sample period: 2018–2022
+[prices_val, dates] = selectPriceRange(myPrice_dt, '01/01/2018', '31/12/2022'); 
+
+%% ====================== 2. Returns and Moments ======================
+
 daysPerYear = 252;
 
-% Daily log-returns
-LogRet = log(prices_val(2:end,:) ./ prices_val(1:end-1,:));   % (T-1 x N)
+% Daily log-returns: (T-1) x N
+LogRet = log(prices_val(2:end,:) ./ prices_val(1:end-1,:));
 
 % Daily moments
-ExpRet_daily = mean(LogRet);                % 1 x N
-CovMatrix_daily    = cov(LogRet);           % N x N
-Std_daily    = std(LogRet);                 % 1 x N
-numAssets    = size(LogRet, 2);
+ExpRet_daily    = mean(LogRet);       % 1 x N
+CovMatrix_daily = cov(LogRet);        % N x N
+Std_daily       = std(LogRet);        % 1 x N
+numAssets       = size(LogRet, 2);
 
 % Annualized moments
-ExpRet_ann = ExpRet_daily * daysPerYear;
-CovMatrix_ann    = CovMatrix_daily * daysPerYear;
-Std_ann    = Std_daily * sqrt(daysPerYear);
+ExpRet_ann    = ExpRet_daily * daysPerYear;         % 1 x N
+CovMatrix_ann = CovMatrix_daily * daysPerYear;      % N x N
+Std_ann       = Std_daily * sqrt(daysPerYear);      % 1 x N
 
-% individual asset volatilities
-vol_i  = sqrt(diag(CovMatrix_ann));                           
+% Individual asset volatilities (annualized)
+vol_i = sqrt(diag(CovMatrix_ann));                  % N x 1
 
-%% === Exercise 1 – Constrained and Robust Efficient Frontier ===
+%% ====================== 3. Map Assets to Macro Groups ======================
 
-%% Map assets to macro groups
 [tf, loc] = ismember(nm', mapping_table.Asset);
 if ~all(tf)
     error('Some assets in asset_prices.csv are not present in mapping_table.csv');
 end
 
-groups = mapping_table.MacroGroup(loc);   % 'Cyclical','Neutral','Defensive'
+groups = mapping_table.MacroGroup(loc);   % e.g. 'Cyclical','Neutral','Defensive'
 
 isCyc = strcmp(groups,'Cyclical');
 isDef = strcmp(groups,'Defensive');
-isNeu = strcmp(groups,'Neutral');
+isNeu = strcmp(groups,'Neutral'); 
 
-%% Generate N random portfolio
-N = 100000;
-RetPtfs = zeros(1,N);
-VolaPtfs = zeros(1,N);
-SharpePtfs = zeros(1,N);
+%% ====================== 4. Random Portfolios (for visualization) ======================
+
+N = 100000;  % number of random portfolios
+
+RetPtfs    = zeros(1, N);
+VolaPtfs   = zeros(1, N);
+SharpePtfs = zeros(1, N);
 
 for n = 1:N
-    w = rand(1,numAssets);
-    w = w./sum(w); % normalize weights
+    w = rand(1, numAssets);
+    w = w ./ sum(w);  % normalize weights to sum to 1
 
-    RetPtfs(n) = w*ExpRet_ann';
-    VolaPtfs(n) = sqrt(w * CovMatrix_ann * w');
-    SharpePtfs(n) = RetPtfs(n)/VolaPtfs(n);
+    RetPtfs(n)    = w * ExpRet_ann';
+    VolaPtfs(n)   = sqrt(w * CovMatrix_ann * w');
+    SharpePtfs(n) = RetPtfs(n) / VolaPtfs(n);
 end
 
-%% Plot: random portfolios
+% Plot: random portfolios in mean–variance space
 figure;
 scatter(VolaPtfs, RetPtfs, [], SharpePtfs, 'filled')
 colorbar
-title('Random Portfolios: Expected return vs volatility')
+title('Random Portfolios: Expected Return vs Volatility')
 xlabel('Volatility (annualized)')
 ylabel('Expected return (annualized)')
 
-%% compute efficient frontier con estimateFrontier
-p = Portfolio('AssetList', nm);
-ret_range = linspace(min(RetPtfs), max(RetPtfs), 100);
+%% ====================== 5. Constrained Efficient Frontier ======================
 
+% Portfolio object with constraints
+p    = Portfolio('AssetList', nm);
 nPort = 100;
-lb = zeros(numAssets,1);
-ub = 0.25*ones(numAssets,1);
-p = setBounds(p, lb, ub);
 
-% Maschere logiche (le hai già pronte)
+% Long-only with upper bound 25% per asset
+lb = zeros(numAssets, 1);
+ub = 0.25 * ones(numAssets, 1);
+p  = setBounds(p, lb, ub);
+
+% Logical masks for groups (row vectors)
 isCyc = isCyc(:)';   
 isDef = isDef(:)';
 
-maskDef    = double(isDef);            % somma pesi Defensive
-maskCycDef = double(isCyc | isDef);    % Cyclical + Defensive
+maskDef    = double(isDef);            % sum of Defensive weights
+maskCycDef = double(isCyc | isDef);    % sum of Cyclical + Defensive weights
 
-% Vincoli lineari: A*w <= b
+% Linear constraints A * w <= b
 A = [
-       maskDef;            % sum_Def <= 0.40
-       maskCycDef;         % sum_CycDef <= 0.75
-      -maskCycDef          % -sum_CycDef <= -0.45  -> sum_CycDef >= 0.45
+       maskDef;            % sum_Def      <= 0.40
+       maskCycDef;         % sum_CycDef   <= 0.75
+      -maskCycDef          % -sum_CycDef  <= -0.45  -> sum_CycDef >= 0.45
     ];
 b = [0.40; 0.75; -0.45];
 
 p = setInequality(p, A, b);
+
+% Full investment constraint
 p = setBudget(p, 1, 1);
-P= setAssetMoments(p, ExpRet_ann, CovMatrix_ann);
-W_OPT_estimate= estimateFrontier(P, nPort);
 
-% Momenti dei portafogli sulla frontiera
+% Set asset moments
+P = setAssetMoments(p, ExpRet_ann, CovMatrix_ann);
+
+% Compute constrained efficient frontier
+W_OPT_estimate = estimateFrontier(P, nPort);    % numAssets x nPort
+
+% Portfolio moments on the classical frontier
 [portRisk, portExpRet] = estimatePortMoments(P, W_OPT_estimate);
-% portRisk    : [1 x nPort] std dev
-% portExpRet  : [1 x nPort] expected return
+% portRisk   : [1 x nPort] standard deviations
+% portExpRet : [1 x nPort] expected returns
 
-%% Portafoglio a minima varianza
+%% ====================== 6. Classical MVP and Maximum-Sharpe ======================
+
+% Minimum-Variance Portfolio (classical)
 [~, idxMinVar] = min(portRisk);
-wMinVar     = W_OPT_estimate(:, idxMinVar);
-retMinVar   = portExpRet(idxMinVar);
-riskMinVar  = portRisk(idxMinVar);
+wMinVar    = W_OPT_estimate(:, idxMinVar);
+retMinVar  = portExpRet(idxMinVar);
+riskMinVar = portRisk(idxMinVar);
 
-%% Portafoglio a massimo Sharpe
-rf = 0.00;   % metti il tuo risk-free (es. 0.02 per 2%)
+% Maximum-Sharpe Portfolio (classical)
+rf       = 0.00;                       % risk-free (set to zero here)
 excessRet = portExpRet - rf;
 Sharpe    = excessRet ./ portRisk;
 
 [~, idxMaxSharpe] = max(Sharpe);
-wMaxSharpe     = W_OPT_estimate(:, idxMaxSharpe);
-retMaxSharpe   = portExpRet(idxMaxSharpe);
-riskMaxSharpe  = portRisk(idxMaxSharpe);
-maxSharpeVal   = Sharpe(idxMaxSharpe);
+wMaxSharpe    = W_OPT_estimate(:, idxMaxSharpe);
+retMaxSharpe  = portExpRet(idxMaxSharpe);
+riskMaxSharpe = portRisk(idxMaxSharpe);
+maxSharpeVal  = Sharpe(idxMaxSharpe);
 
-%% reseampling approach fatto a mano seguendo slide
+%% ====================== 7. Robust Frontier via Resampling ======================
+
 tic
+fprintf('\n=== Robust Resampling Procedure ===\n');
+
 p = Portfolio('AssetList', nm);
 
+% Same constraints as classical frontier
 nPort = 100;
-lb = zeros(numAssets,1);
-ub = 0.25*ones(numAssets,1);
-p  = setBounds(p, lb, ub);
+lb    = zeros(numAssets,1);
+ub    = 0.25 * ones(numAssets,1);
+p     = setBounds(p, lb, ub);
 
-% Maschere logiche (le hai già pronte)
+% Rebuild masks (row vectors)
 isCyc = isCyc(:)';   
 isDef = isDef(:)';
 
-maskDef    = double(isDef);          % somma pesi Defensive
-maskCycDef = double(isCyc | isDef);  % Cyclical + Defensive
+maskDef    = double(isDef);            % sum of Defensive weights
+maskCycDef = double(isCyc | isDef);    % sum of Cyclical + Defensive weights
 
-% Vincoli lineari: A*w <= b
+% Linear constraints A * w <= b
 A = [
-       maskDef;            % sum_Def    <= 0.40
-       maskCycDef;         % sum_CycDef <= 0.75
-      -maskCycDef          % -sum_CycDef <= -0.45  -> sum_CycDef >= 0.45
+       maskDef;            % sum_Def      <= 0.40
+       maskCycDef;         % sum_CycDef   <= 0.75
+      -maskCycDef          % -sum_CycDef  <= -0.45  -> sum_CycDef >= 0.45
     ];
 b = [0.40; 0.75; -0.45];
 
 p = setInequality(p, A, b);
+p = setBudget(p, 1, 1);   % full investment
 
-% FULL INVESTMENT
-p = setBudget(p, 1, 1);
-
-% RESAMPLING
+% Resampling parameters
 nResampling = 100;
-T       = size(LogRet,1);   % numero di osservazioni storiche
-rf = 0;                     % risk-free per Sharpe
+T           = size(LogRet,1);   % number of historical observations
+rf          = 0;                % risk-free for Sharpe (kept at 0)
 
-% Preallocazioni in stile "codice 2"
-Weights   = zeros(numAssets, nPort, nResampling);
-RiskSim   = zeros(nPort, nResampling);
-RetSim    = zeros(nPort, nResampling);
-SharpeSim = zeros(nPort, nResampling);
+% Preallocation for frontier weights across resamples
+Weights = zeros(numAssets, nPort, nResampling);
 
-rng(42)
+rng(42)  % fixed seed for reproducibility
 for i = 1:nResampling
     
-    % 1) Simula una serie storica di T osservazioni
-    R_sim = mvnrnd(ExpRet_ann, CovMatrix_ann, T);       % T x numAssets
+    % 1) Simulate a daily return series of length T from N(mu_daily, Sigma_daily)
+    R_sim = mvnrnd(ExpRet_daily, CovMatrix_daily, T);   % T x numAssets
     
-    % 2) Stima momenti dal dataset simulato
-    ExpRet_i = mean(R_sim);             % 1 x numAssets
-    Cov_i      = cov(R_sim);            % numAssets x numAssets
+    % 2) Estimate annualized moments from the simulated sample
+    ExpRet_i = mean(R_sim) * daysPerYear;      % 1 x numAssets
+    Cov_i    = cov(R_sim) * daysPerYear;       % numAssets x numAssets
     
-    % 3) Imposta momenti nel Portfolio simulato
+    % 3) Set simulated moments in the portfolio object
     P_sim = setAssetMoments(p, ExpRet_i, Cov_i);
     
-    % 4) Calcolo la frontiera con i vincoli
-    W_OPT_i = estimateFrontier(P_sim, nPort);           % numAssets x nPort
+    % 4) Compute the constrained frontier for this resample
+    W_OPT_i = estimateFrontier(P_sim, nPort);  % numAssets x nPort
+    
+    % Store weights
     Weights(:,:,i) = W_OPT_i;
-    
-    % 5) Rischio/rendimento dei portafogli simulati
-    [pf_risk, pf_ret] = estimatePortMoments(P_sim, W_OPT_i);
-    % pf_risk, pf_ret: 1 x nPort
-    
-    RiskSim(:, i) = pf_risk.';      % nPort x 1
-    RetSim(:,  i) = pf_ret.';       % nPort x 1
-    
-    % 6) Sharpe per ogni punto di frontiera in questa simulazione
-    SharpeSim(:, i) = (pf_ret.' - rf) ./ pf_risk.';  % nPort x 1
 end
 
-% FRONTIERA / PORTAFOGLI
-% Media dei pesi, dei rischi, dei rendimenti e degli Sharpe
-meanWeights = mean(Weights, 3);   % numAssets x nPort  (== "W_OPT_robust" di prima)
-meanRisk    = mean(RiskSim, 2);   % nPort x 1
-meanRet     = mean(RetSim,  2);   % nPort x 1
-meanSharpe  = mean(SharpeSim, 2); % nPort x 1
+% Robust frontier: average the weights across resamples
+W_OPT_robust = mean(Weights, 3);   % numAssets x nPort
 
-% (Se vuoi tenere il nome vecchio)
-W_OPT_robust = meanWeights;
+% Compute risk/return on the robust frontier using original (in-sample) moments
+Ret_robust  = (ExpRet_ann(:)' * W_OPT_robust);                
+Risk_robust = sqrt(diag(W_OPT_robust' * CovMatrix_ann * W_OPT_robust))';  
 
-% ---- Portafoglio ROBUSTO a minima varianza (Portfolio C) ----
-[~, idxMVP_res] = min(meanRisk);
-wMinVar_rob     = meanWeights(:, idxMVP_res);
-retMinVar_rob   = meanRet(idxMVP_res);
-riskMinVar_rob  = meanRisk(idxMVP_res);
+% Sharpe ratio for each robust portfolio
+Sharpe_robust = (Ret_robust - rf) ./ Risk_robust;
 
-% per coerenza con il secondo codice
-Portfolio_C        = wMinVar_rob;
-mvp_risk_resampled = riskMinVar_rob;
-mvp_ret_resampled  = retMinVar_rob;
+%% ====================== 8. Robust MVP (C) and Robust MSRP (D) ======================
 
-% ---- Portafoglio ROBUSTO a massimo Sharpe (Portfolio D) ----
-[~, idxMSRP_res] = max(meanSharpe);
-wMaxSharpe_rob   = meanWeights(:, idxMSRP_res);
-maxSharpe_risk   = meanRisk(idxMSRP_res);
-maxSharpe_ret    = meanRet(idxMSRP_res);
+% Portfolio C: Robust Minimum-Variance Portfolio
+[~, idxMinVar_rob] = min(Risk_robust);
+wC      = W_OPT_robust(:, idxMinVar_rob);
+retC    = Ret_robust(idxMinVar_rob);
+riskC   = Risk_robust(idxMinVar_rob);
+sharpeC = Sharpe_robust(idxMinVar_rob);
 
-Portfolio_D      = wMaxSharpe_rob;
-maxSharpeVal_rob = meanSharpe(idxMSRP_res);
-toc
+% Portfolio D: Robust Maximum-Sharpe Portfolio
+[~, idxMaxSharpe_rob] = max(Sharpe_robust);
+wD      = W_OPT_robust(:, idxMaxSharpe_rob);
+retD    = Ret_robust(idxMaxSharpe_rob);
+riskD   = Risk_robust(idxMaxSharpe_rob);
+sharpeD = Sharpe_robust(idxMaxSharpe_rob);
 
+elapsedTime = toc;
+fprintf('Robust resampling completed in %.4f seconds.\n\n', elapsedTime);
+
+%% ====================== 9. Print Results ======================
+
+fprintf('================ Classical Constrained Frontier =================\n');
+fprintf('Minimum-Variance Portfolio (Unrobust)\n');
+fprintf('  Return    : %.4f\n', retMinVar);
+fprintf('  Volatility: %.4f\n', riskMinVar);
+fprintf('  Weights   :\n');
+disp(wMinVar);
+
+fprintf('Maximum-Sharpe Portfolio (Unrobust)\n');
+fprintf('  Return    : %.4f\n', retMaxSharpe);
+fprintf('  Volatility: %.4f\n', riskMaxSharpe);
+fprintf('  Sharpe    : %.4f\n', maxSharpeVal);
+fprintf('  Weights   :\n');
+disp(wMaxSharpe);
+
+fprintf('\n================ Robust Frontier (Resampling) ====================\n');
+fprintf('Portfolio C – Robust Minimum-Variance Portfolio\n');
+fprintf('  Return    : %.4f\n', retC);
+fprintf('  Volatility: %.4f\n', riskC);
+fprintf('  Sharpe    : %.4f\n', sharpeC);
+fprintf('  Weights   :\n');
+disp(wC);
+
+fprintf('Portfolio D – Robust Maximum-Sharpe Portfolio\n');
+fprintf('  Return    : %.4f\n', retD);
+fprintf('  Volatility: %.4f\n', riskD);
+fprintf('  Sharpe    : %.4f\n', sharpeD);
+fprintf('  Weights   :\n');
+disp(wD);
 
 %% === Exercise 2 – Black–Litterman Model ===
 
@@ -441,6 +474,7 @@ ylabel('Annualized Contribution');
 title('Contribution of Each View to BL Expected Returns');
 legend("View1","View2","View3");
 
+
 %% === Exercise 3 – Diversification-Based Optimization ===
 
 %% Common contstraints (G, H, EW)
@@ -559,9 +593,11 @@ ylabel('Weight')
 title('Comparison of G, H and Benchmark Portfolio Weights')
 grid on
 
+
 %% === Exercise 4 – PCA and Conditional Value-at-Risk ===
 
 %% 4(a) PCA on covariance matrix – find k explaining at least 85% variance
+
 % Standardize returns
 RetStd = (LogRet - ExpRet_daily) ./ Std_daily; 
 CovStd = cov(RetStd);
@@ -607,6 +643,7 @@ reconReturn = factorRetn * factorLoading' .* Std_daily+ ExpRet_daily;
 unexplainedRetn = LogRet - reconReturn; % epsilon
 
 %% 4(b) Portfolio I – Max Sharpe with PCA covariance & v1-neutrality
+
 [V_eig, D_eig] = eig(CovMatrix_daily);
 [~, idxMax] = max(diag(D_eig));
 v1 = V_eig(:, idxMax);       
@@ -653,7 +690,9 @@ fprintf('Daily Sharpe (recomputed) : %.4f\n', Sharpe_I_daily_check);
 fprintf('Annual Sharpe (recomputed): %.4f\n', Sharpe_I_annual_check);
 fprintf('PC1 exposure w''v1         : %.4f\n', w_I' * v1);
 
+
 %% 4(b) Portfolio J – Min CVaR_5% with vol cap 15%% and 0<=w<=0.25
+
 alpha = 0.95;            % CVaR at 5% tail
 vol_cap = 0.15;          % 15% annualized volatility
 
@@ -695,13 +734,14 @@ port_min = setBounds(port_min, zeros(1,numAssets), 0.25*ones(1,numAssets));
 port_min = setAssetMoments(port_min, ExpRet_ann, CovMatrix_ann);
 
 w_minVarJ = estimateFrontierLimits(port_min, 'min');
-vol_minVarJ = sqrt(w_minVarJ' * CovMatrix_ann * w_minVarJ)
+vol_minVarJ = sqrt(w_minVarJ' * CovMatrix_ann * w_minVarJ);
 
 % Given the in-sample covariance structure and the constraints (full investment, 0 ≤ wᵢ ≤ 0.25), the minimum 
 % variance portfolio already exhibits an annual volatility above 15%. Therefore, a strict volatility cap at 15% 
 % is infeasible in this universe. In practice, we keep the non-linear volatility constraint in the optimization 
 % problem, but the solver converges to a solution with volatility around 17–18%, i.e. the minimum level compatible
 % with the given constraints
+
 
 %% 4(c) Tail risk (CVaR), Volatility, Max Drawdown – I vs J
 fprintf('\n=== Portfolio I ===\n');
@@ -722,6 +762,7 @@ VaR_J  = quantile(pRet_J, 1-alpha);
 
 CVaR_I = -mean(pRet_I(pRet_I <= VaR_I))*100; % (percentage)
 CVaR_J = -mean(pRet_J(pRet_J <= VaR_J))*100;
+
 
 % Equity curves (usa simple returns per performance metrics)
 ret_simple = prices_val(2:end,:) ./ prices_val(1:end-1,:) - 1;   % T-1 x N
@@ -747,6 +788,7 @@ perfTable_IJ = table( ...
 disp('=== Comparison Portfolio I vs Portfolio J ===');
 disp(perfTable_IJ);
 
+
 % Plot and compare equity curves 
 figure;
 plot(dates(2:end), equity_I, 'LineWidth',1.5); hold on;
@@ -756,18 +798,7 @@ xlabel('Date'); ylabel('Equity (base = 100)');
 title('Equity curves – Portfolio I vs Portfolio J');
 grid on;
 
-%% Local function: CVaR objective
-function cvar_val = cvar_obj(w, LogRet, alpha)
-    pRet = LogRet * w;             % scenario returns
-    VaR  = quantile(pRet, 1-alpha);
-    tail = pRet(pRet <= VaR);
-    cvar_val = -mean(tail);        % minimize losses in the 5% worst cases
-end
-
-
 %% === Exercise 5 – Personal Strategy ===
-
-%%
 [Vecs,Vals] = eig(CovMatrix_ann);
 lambda      = diag(Vals);                         % eigenvalues (unsorted)
 
@@ -779,43 +810,43 @@ F = V_sorted(:, 1:3);
 sig_f = diag(lambda_sorted(1:3));
 mu = ExpRet_ann';
 
+% specific variance vector
 vec = zeros(numAssets, 1);
 for i = 1 : numAssets
-    var_spiegata = 0;
-    for j = 1 : k 
-        var_spiegata = var_spiegata + lambda_sorted(j) * F(i, j)^2;
+    var_explained = 0;
+    for j = 1 : k
+        var_explained = var_explained + lambda_sorted(j) * F(i, j)^2;
     end
-    vec(i) = CovMatrix_ann(i, i) - var_spiegata;
+    vec(i) = CovMatrix_ann(i, i) - var_explained;
 end
 D = diag(vec);
 
 sig = @(w) w' * (F * sig_f * F' + D) * w;
 
-gamma = 1;           
+gamma = 1;
 f = @(w) mu'*w - gamma * sig(w);
 
-% vincolo di uguaglianza: sum(w) = 1
+% equality constraint: sum(w) = 1
 Aeq = ones(1, numAssets);
 beq = 1;
 
 % bounds: 0 <= w_i <= 0.2
 lb = zeros(numAssets, 1);
-ub = 0.25 * ones(numAssets, 1);
+ub = 0.2 * ones(numAssets, 1);
 
-% punto iniziale: portafoglio equally-weighted
+% initial guess: equally-weighted portfolio
 w0 = ones(numAssets, 1) / numAssets;
 
-% fmincon MINIMIZZA: usiamo il negativo di f
+% fmincon MINIMIZES: we use the negative of f
 obj = @(w) -f(w);
 
 [w_opt_strategy, minus_f_opt, exitflag, output] = fmincon(obj, w0, ...
     [], [], Aeq, beq, lb, ub, [], opts);
 
-% valore MASSIMO della funzione obiettivo
+% MAX value of the objective function
 f_opt = -minus_f_opt;
 
-% pesi ottimali
-
+% optimal weights
 disp('=== Optimal portfolio weights (%) ===');
 for i = 1:length(w_opt_strategy)
     fprintf('%-10s : %6.2f %%\n', nm{i}, w_opt_strategy(i)*100);
@@ -824,54 +855,91 @@ end
 %% Selection of a subset of Dates
 [prices_val_validation, dates_validation] = selectPriceRange(myPrice_dt, '01/01/2023', '30/11/2024');
 
-%% Valore portafoglio e pesi nel tempo con ribilanciamento semestrale
+%% Portfolio value and weights over time with semi-annual rebalancing
 V0 = 100;
 rebalanceMonths = 6;
 
 [ptf_value, weights_time] = simulateRebalancedPortfolio(w_opt_strategy, prices_val_validation, dates_validation, V0, rebalanceMonths);
 
-%% Plot del valore del portafoglio nel tempo
+%% Plot of portfolio value over time with rebalancing
 figure;
-plot(dates_validation, ptf_value);
-xlabel('Data');
-ylabel('Valore portafoglio');
-title('Evoluzione del valore del portafoglio con ribilanciamento semestrale');
+plot(dates_validation, weights_time(:,1), dates_validation, weights_time(:,2), ...
+     dates_validation, weights_time(:,4), dates_validation, weights_time(:,5), ...
+     dates_validation, weights_time(:,12), dates_validation, weights_time(:,16));
+xlabel('Date');
+ylabel('Weight');
+title('Evolution of selected weights w_i(t) with semi-annual rebalancing');
+legend('Asset 1','Asset 2','Asset 4','Asset 5','Asset 12','Asset 16');
 grid on;
 
-% plot principali pesi nel tempo, per vedere l’effetto del ribilanciamento
-figure;
-plot(dates_validation, weights_time(:,1), dates_validation, weights_time(:,2), dates_validation, weights_time(:,5), dates_validation, weights_time(:,9), dates_validation, weights_time(:,12), dates_validation, weights_time(:,16));
-xlabel('Data');
-ylabel('Peso');
-title('Evoluzione di alcuni pesi w_i(t)');
-legend('Asset 1','Asset 2', 'Asset 5', 'Asset 9', 'Asset 12', 'Asset 16');
-grid on;
-
-%% Performance
+%% Performance with rebalancing
 [annRet_sim, annVol_sim, Sharpe_sim, MaxDD_sim, Calmar_sim] = getPerformanceMetrics(ptf_value);
 
-fprintf('--- Performance del portafoglio ---\n');
-fprintf('Rendimento annualizzato:   %.4f\n', annRet_sim);
-fprintf('Volatilità annualizzata:   %.4f\n', annVol_sim);
+fprintf('--- Portfolio performance ---\n');
+fprintf('Annualized return:         %.4f\n', annRet_sim);
+fprintf('Annualized volatility:     %.4f\n', annVol_sim);
 fprintf('Sharpe ratio:              %.4f\n', Sharpe_sim);
-fprintf('Max Drawdown:              %.4f\n', MaxDD_sim);
+fprintf('Maximum drawdown:          %.4f\n', MaxDD_sim);
 fprintf('Calmar ratio:              %.4f\n', Calmar_sim);
 
-%% Confronto: portafoglio vs singoli asset (prezzi normalizzati a 100)
+%% Comparison: portfolio vs individual assets (prices normalized to 100) with rebalancing
 idxAssets = [1 2 5 9 12 16];
 
-% prezzi normalizzati a 100 alla prima data
+% prices normalized to 100 at the first date
 norm_prices = V0 * prices_val_validation(:, idxAssets) ./ prices_val_validation(1, idxAssets);
 
 figure;
-plot(dates_validation, ptf_value, 'LineWidth', 1.5);  % portafoglio (parte da 100)
+plot(dates_validation, ptf_value, 'LineWidth', 1.5);  % portfolio (starting at 100)
 hold on;
-plot(dates_validation, norm_prices);                      % asset normalizzati
+plot(dates_validation, norm_prices);                  % normalized asset prices
 hold off;
 
-xlabel('Data');
-ylabel('Valore (base 100)');
-title('Portafoglio vs prezzi normalizzati di alcuni asset');
-legend('Portafoglio', 'Asset 1','Asset 2','Asset 5','Asset 9','Asset 12','Asset 16', ...
+xlabel('Date');
+ylabel('Value (base 100)');
+title('Portfolio vs normalized asset prices');
+legend('Portfolio','Asset 1','Asset 2','Asset 5','Asset 9','Asset 12','Asset 16', ...
        'Location','best');
 grid on;
+
+%% Portfolio value and weights over time without rebalancing
+no_rebalance = Inf;
+[ptf_value_no_rebalance, weights_time_no_rebalance] = simulateRebalancedPortfolio(w_opt_strategy, prices_val_validation, dates_validation, V0, no_rebalance);
+
+%% plot of main weights over time without rebalancing
+figure;
+plot(dates_validation, weights_time_no_rebalance(:,1), dates_validation, weights_time_no_rebalance(:,2), ...
+     dates_validation, weights_time_no_rebalance(:,4), dates_validation, weights_time_no_rebalance(:,5), ...
+     dates_validation, weights_time_no_rebalance(:,12), dates_validation, weights_time_no_rebalance(:,16));
+xlabel('Date');
+ylabel('Weight');
+title('Evolution of selected weights w_i(t) without rebalancing');
+legend('Asset 1','Asset 2','Asset 4','Asset 5','Asset 12','Asset 16');
+grid on;
+
+%% === Final Discussion ===
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+%% ===== Local function: CVaR objective =====
+function cvar_val = cvar_obj(w, LogRet, alpha)
+    pRet = LogRet * w;             % scenario returns
+    VaR  = quantile(pRet, 1-alpha);
+    tail = pRet(pRet <= VaR);
+    cvar_val = -mean(tail);        % minimize losses in the 5% worst cases
+end
