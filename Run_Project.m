@@ -18,7 +18,7 @@ nm = table_prices.Properties.VariableNames(2:end);
 myPrice_dt = array2timetable(values, 'RowTimes', dt, 'VariableNames', nm); 
 
 %% Selection of a subset of Dates
-[prices_val, dates] = selectPriceRange(myPrice_dt, '01/01/2018', '31/12/2022');
+[prices_val, ~] = selectPriceRange(myPrice_dt, '01/01/2018', '31/12/2022');
 
 %% Calculate returns
 daysPerYear = 252;
@@ -230,26 +230,54 @@ toc
 
 %% === Exercise 2 – Black–Litterman Model ===
 
-%% Calculate returns and Covariance Matrix
+%% Calculate simple returns and Covariance Matrix
 daysPerYear = 252;
-Ret         = tick2ret(prices_val);           % log returns (T-1 x N)
+Ret         = tick2ret(prices_val);           % simple returns (T-1 x N)
 numAssets   = size(Ret, 2);
 CovMatrix   = cov(Ret);
 
-CovMatrix_ann = CovMatrix * daysPerYear;  
+% ATTENZIONE: qui c’era un typo (daysPeryear)
+CovMatrix_simple_ann = CovMatrix * daysPerYear;  
 
-ExpRet      = mean(Ret);                      % vettore 1 x N (giornalieri)
-ExpRet_ann  = ExpRet * daysPerYear;           % annualizzati
+ExpRet_simple      = mean(Ret);                      % vettore 1 x N (giornalieri)
+ExpRet_simple_ann  = ExpRet_simple * daysPerYear;           % annualizzati
+
+% Stampa dei ritorni medi annualizzati
+fprintf('\n=== Ritorni medi attesi annualizzati (sample) ===\n');
+Tab_ExpRet = table(nm', ExpRet_simple_ann', ...
+    'VariableNames', {'Asset','ExpRet_ann'});
+disp(Tab_ExpRet);
+
+%% a) Compute equilibrium returns 
+
+assetNames  = string(capitalization_weights.Asset);
+MacroGroup  = string(capitalization_weights.MacroGroup);
+wMKT        = capitalization_weights.MarketWeight;
+
+tau = 1/length(Ret);  
+rf = 0;
+Rm_simple = Ret * wMKT;  % serie dei ritorni di mercato (giornalieri)
+lambda = ((mean(Rm_simple)*daysPerYear) - rf) / ...
+         (var(Rm_simple)*daysPerYear);
+
+mu_mkt = lambda * CovMatrix_simple_ann * wMKT;   % equilibrium returns (annual)
+C      = tau * CovMatrix_simple_ann;             % scaled prior covariance
+
+fprintf('\n(a) Equilibrium returns annual:\n');
+Tab_Equil = table(assetNames, mu_mkt, ...
+    'VariableNames', {'Asset','EquilibriumRet_ann'});
+disp(Tab_Equil);
+
+% Plot prior distribution (tutti gli asset insieme)
+X_prior = mvnrnd(mu_mkt, C, 200);   % 200 scenari di rendimento di equilibrio
+figure;
+histogram(X_prior);   % istogramma aggregato
+title('Prior Distribution of Returns (Equilibrium)');
+xlabel('Annual Return')
+ylabel('Frequency')
 
 %% b) Introduce the views 
-Cap         = readtable("Data\capitalization_weights.csv");
-assetNames  = string(Cap.Asset);
-MacroGroup  = string(Cap.MacroGroup);
-wMKT        = Cap.MarketWeight;
-
 v   = 3;                           % numero di views
-tau = 1/length(Ret);  
-
 P      = zeros(v, numAssets); 
 q      = zeros(v, 1);        
 Omega  = zeros(v);
@@ -274,7 +302,7 @@ q(3)                 = 0.005;
 
 % Compute Omega as tau*P*Cov*P' (diagonal approximation)
 for i = 1:v
-    Omega(i,i) = tau * P(i,:) * CovMatrix_ann * P(i,:)';
+    Omega(i,i) = tau * P(i,:) * CovMatrix_simple_ann * P(i,:)';
 end
 
 %%% Plot views distribution
@@ -288,34 +316,14 @@ legend
 title('Distribution of Views')
 hold off
 
-%% a) Compute equilibrium returns 
-rf = 0;
-Rm_log = Ret * wMKT;  % serie dei ritorni di mercato (giornalieri)
-
-lambda = ((mean(Rm_log)*daysPerYear) - rf) / ...
-         (var(Rm_log)*daysPerYear);
-
-mu_mkt = lambda * CovMatrix_ann * wMKT;   % equilibrium returns (annual)
-C      = tau * CovMatrix_ann;             % scaled prior covariance
-
-fprintf('\n(a) Equilibrium returns annual:\n');
-Tab_Equil = table(assetNames, mu_mkt, ...
-    'VariableNames', {'Asset','EquilibriumRet_ann'});
-disp(Tab_Equil);
-
-% Plot prior distribution (tutti gli asset insieme)
-X_prior = mvnrnd(mu_mkt, C, 200);   % 200 scenari di rendimento di equilibrio
-figure;
-histogram(X_prior);   % istogramma aggregato
-title('Prior Distribution of Returns (Equilibrium)');
-xlabel('Annual Return')
-ylabel('Frequency')
-
 %% c) Obtain posterior expected returns and compute the efficient frontier under standard
 %     constraints (i.e. full investment & no short-selling ) using the in-sample data.
-muBL = (C\eye(numAssets) + P'/Omega*P) \ (P'/Omega*q + C\mu_mkt);
-covBL = inv(P'/Omega*P + inv(C));
 
+invC = C \ eye(numAssets);      
+
+muBL = (invC + P'/Omega*P) \ (invC*mu_mkt + P'/Omega*q);
+
+covBL = inv(invC + P'/Omega*P);  
 % Compare prior vs BL
 TBL = table(assetNames, mu_mkt, muBL, ...
     'VariableNames', ["Asset","PriorReturnAnnual","BLReturnAnnual"]);
@@ -324,7 +332,7 @@ disp(TBL) % Plot Distribution
 % Black-Litterman PTF
 portBL = Portfolio('NumAssets', numAssets, 'Name', 'MV with BL');
 portBL = setDefaultConstraints(portBL);
-portBL = setAssetMoments(portBL, muBL, CovMatrix_ann+covBL);
+portBL = setAssetMoments(portBL, muBL, CovMatrix_simple_ann+covBL);
 
 % Efficient frontier (computes 100 ptfs along efficient frontier,
 %                     and calculates volatility and return for each one)
@@ -367,9 +375,10 @@ Sharpe_E =(ret_minVarBL-rf)/vol_minVarBL;
 Sharpe_F =(ret_maxSharpeBL-rf)/vol_maxSharpeBL;
 
 %% Classical ptfs 
+
 port = Portfolio('NumAssets', numAssets, 'Name', 'Mean-Variance');
 port = setDefaultConstraints(port);
-port = setAssetMoments(port, mean(Ret), CovMatrix);
+port = setAssetMoments(port, mean(Ret), CovMatrix_simple_ann);
 
 w_minVar = estimateFrontierLimits(port, 'min');
 [vol_minVar, ret_minVar] = estimatePortMoments(port, w_minVar);
@@ -405,6 +414,7 @@ pie(w_minVarBL(idxBLMV), assetNames(idxBLMV))
 title('Black-Litterman Minimum Variance Portfolio')
 
 %% Impact of views on portfolio (Delta weights) – BL MaxSharpe vs Classical MaxSharpe
+
 delta_weights = w_maxSharpeBL - w_maxSharpe;
 figure;
 bar(delta_weights);
@@ -417,7 +427,7 @@ contrib = zeros(numAssets, v);
 for i = 1:v
     P_i     = P(i,:)';
     Omega_i = Omega(i,i);
-    contrib(:,i) = CovMatrix_ann * P_i / (P_i' * CovMatrix_ann * P_i + Omega_i) ...
+    contrib(:,i) = CovMatrix_simple_ann * P_i / (P_i' * CovMatrix_simple_ann * P_i + Omega_i) ...
                    * (q(i) - P_i' * mu_mkt);
 end
 
@@ -430,7 +440,6 @@ xlabel('Asset Index');
 ylabel('Annualized Contribution');
 title('Contribution of Each View to BL Expected Returns');
 legend("View1","View2","View3");
-
 
 %% === Exercise 3 – Diversification-Based Optimization ===
 
@@ -550,84 +559,99 @@ ylabel('Weight')
 title('Comparison of G, H and Benchmark Portfolio Weights')
 grid on
 
-
 %% === Exercise 4 – PCA and Conditional Value-at-Risk ===
 
 %% 4(a) PCA on covariance matrix – find k explaining at least 85% variance
-% Eigen-decomposition of covariance matrix (annual)
-[Vecs,Vals] = eig(CovMatrix_ann);
-lambda      = diag(Vals);                         % eigenvalues (unsorted)
+% Standardize returns
+RetStd = (LogRet - ExpRet_daily) ./ Std_daily; 
+CovStd = cov(RetStd);
 
-% Sort eigenvalues/eigenvectors in descending order
-[lambda_sorted, idxEV] = sort(lambda, 'descend');
-V_sorted               = Vecs(:, idxEV);
+% full PCA
+[factorLoading_full, factorRetn_full, latent_full, ~, explained_full] = pca(RetStd); 
 
-explained_var = lambda_sorted / sum(lambda_sorted);   % fraction each component
-cum_explained = cumsum(explained_var);
-
-% Find smallest k with at least 85% cumulative variance
-threshold = 0.85;
-k = find(cum_explained > threshold, 1);
-
-fprintf('\n=== PCA – Explained variance ===\n');
-disp(table((1:numAssets)', lambda_sorted, explained_var, cum_explained, ...
-    'VariableNames', {'PC','Eigenvalue','Explained','CumExplained'}));
-fprintf('Number of PCs explaining at least 85%% variance: k = %d\n', k);
-
-% Plot explained and cumulative variance (optional)
+% explained var
 figure;
-bar(explained_var(1:10)*100);
-xlabel('Principal Component'); ylabel('Explained Variance (%)');
-title('PCA – Explained variance per component');
+bar(explained_full);
+title('Variance explained by each Principal Component');
+xlabel('Principal Component');
+ylabel('Explained Variance (%)');
 
-figure;
-plot(1:numAssets, cum_explained*100, '-o');
-xlabel('Number of components'); ylabel('Cumulative Explained Variance (%)');
-title('PCA – Cumulative explained variance');
-grid on;
+% cumulative variance
+n_list = linspace(1, 15, numAssets);
+CumExplVar = cumsum(explained_full);
+f = figure();
+title('Total Percentage of Explained Variances for the first n-components')
+plot(n_list,CumExplVar, 'm')
+hold on
+scatter(n_list,CumExplVar,'m', 'filled')
+grid on
+xlabel('Total number of Principal Components')
+ylabel('Percentage of Explained Variances')
+
+% find k
+k = find(CumExplVar >= 85, 1, 'first');
+fprintf('\n=== 4a) PCA ===\n');
+fprintf('Smallest k with at least 85%%% of variance: k = %d\n', k);
+
+factorLoading = factorLoading_full(:,1:k);
+factorRetn = factorRetn_full (:,1:k);
+covarFactor = cov(factorRetn); 
+
+% Rescale back to original return units
+Lambda = diag(Std_daily); % diag matrix of std dev of original assets
+D_std = diag(var(LogRet - (factorRetn*factorLoading' .* Std_daily+ ExpRet_daily))); % Idyiosyncratic risk
+CovarPCA = Lambda * (factorLoading * covarFactor * factorLoading' + D_std) * Lambda; % PCA-based covariance matrix
+
+% Reconstructed returns in the original units 
+reconReturn = factorRetn * factorLoading' .* Std_daily+ ExpRet_daily;
+unexplainedRetn = LogRet - reconReturn; % epsilon
 
 %% 4(b) Portfolio I – Max Sharpe with PCA covariance & v1-neutrality
-% Reconstructed covariance using first k components
-V_k = V_sorted(:,1:k);                          % numAssets x k
-D_k = diag(lambda_sorted(1:k));                 % k x k
-Cov_PCA = V_k * D_k * V_k';                     % numAssets x numAssets
+[V_eig, D_eig] = eig(CovMatrix_daily);
+[~, idxMax] = max(diag(D_eig));
+v1 = V_eig(:, idxMax);       
+x0 = ones(numAssets,1)/numAssets;  % starting point: equal-weight portfolio
 
-% First eigenvector of full covariance (dominant market factor)
-v1 = V_sorted(:,1);                             % numAssets x 1
+% Constraints: 0 <= w_i <= 0.25, w'v1 <= 0.5                              
+lb = zeros(numAssets,1); 
+ub = 0.25*ones(numAssets,1); 
 
-% Constraints: full investment, 0 <= w_i <= 0.25, w'v1 <= 0.5
-x0  = ones(numAssets,1)/numAssets;              % starting point
-lb  = zeros(numAssets,1);
-ub  = 0.25 * ones(numAssets,1);
+% Full investment (sum of weights must be 1)
+Aeq = ones(1,numAssets);
+beq = 1;
 
 % Inequality constraint: w' v1 <= 0.5  ->  (v1') * w <= 0.5
 A  = v1';
 b  = 0.5;
 
-% Equality constraint: sum_i w_i = 1
-Aeq = ones(1,numAssets);
-beq = 1;
-
 rf_I = 0;  % risk-free per Sharpe 
 
 % Objective: maximize Sharpe = (mu'w - rf) / sqrt(w'Cov_PCA w)
 % → minimize -Sharpe
-fun_sharpe_I = @(w) - ((ExpRet_ann * w - rf_I) / sqrt(w' * Cov_PCA * w));
+fun_sharpe_I = @(w) - ((ExpRet_daily * w - rf_I) / sqrt(w' * CovarPCA * w));
 
-[w_I, fval_I, exitflag_I] = fmincon(fun_sharpe_I, x0, ...
-                                    A, b, ...          % <-- nuovo vincolo
-                                    Aeq, beq, ...
-                                    lb, ub, [], opts);
+options = optimoptions('fmincon','Display','final','Algorithm','sqp');
+[w_I, fval_I, exitflag_I] = fmincon(fun_sharpe_I, x0, A, b, Aeq, beq, lb, ub, [], options);
+
+Sharpe_I_daily  = -fval_I;                 % because we minimized the negative Sharpe
+Sharpe_I_annual = sqrt(252) * Sharpe_I_daily;
 
 % Check results
-ret_I  = ExpRet_ann * w_I;
-vol_I  = sqrt(w_I' * Cov_PCA * w_I);
-Sharpe_I = (ret_I - rf_I) / vol_I;
+ExpRet_I_daily  = ExpRet_daily * w_I;
+vol_I_daily  = sqrt(w_I' * CovarPCA * w_I);
+vol_I_annual = vol_I_daily * sqrt(252);
 
-fprintf('\n=== Portfolio I (PCA Max Sharpe, cap su v1, w_i<=0.25) ===\n');
-Tab_I = table(nm', w_I, 'VariableNames', {'Asset','Weight'});
-disp(Tab_I);
-fprintf('Portfolio I: ret = %.4f, vol = %.4f, Sharpe = %.4f\n', ret_I, vol_I, Sharpe_I);
+% Recompute Sharpe ratios to validate consistency
+Sharpe_I_daily_check  = ExpRet_I_daily / vol_I_daily;
+Sharpe_I_annual_check = sqrt(252) * Sharpe_I_daily_check;
+
+fprintf('\n=== Portfolio I – Expected Return and Risk ===\n');
+fprintf('Daily volatility          : %.6f\n', vol_I_daily);
+fprintf('Annual volatility         : %.4f%%\n', 100 * vol_I_annual);
+fprintf('Daily Sharpe (opt value)  : %.4f\n', Sharpe_I_daily);
+fprintf('Daily Sharpe (recomputed) : %.4f\n', Sharpe_I_daily_check);
+fprintf('Annual Sharpe (recomputed): %.4f\n', Sharpe_I_annual_check);
+fprintf('PC1 exposure w''v1         : %.4f\n', w_I' * v1);
 
 %% 4(b) Portfolio J – Min CVaR_5% with vol cap 15%% and 0<=w<=0.25
 alpha = 0.95;            % CVaR at 5% tail
@@ -636,22 +660,16 @@ vol_cap = 0.15;          % 15% annualized volatility
 % Objective: minimize CVaR_5% (historical, daily returns LogRet)
 fun_CVaR = @(w) cvar_obj(w, LogRet, alpha);
 
-% Linear constraints: full investment, 0 <= w_i <= 0.25
-x0_J = ones(numAssets,1)/numAssets;
-lb_J = zeros(numAssets,1);
-ub_J = 0.25 * ones(numAssets,1);
-Aeq_J = ones(1,numAssets);
-beq_J = 1;
+% Standard constraints
 
 % Nonlinear constraint: vol(w) <= 15% annualized
-nonlin_volcap = @(w) deal( w' * CovMatrix_ann * w - vol_cap^2, [] );
-% c(w) = vol - 0.15 <= 0   ; ceq = []
+nonlin_volcap = @(w) deal( sqrt(w'*CovMatrix_daily*w)*sqrt(252) - vol_cap , [] );
 
 optionsJ = optimoptions('fmincon','Display','iter','Algorithm','sqp','ConstraintTolerance',1e-3, ...
     'OptimalityTolerance',1e-6, ...
     'StepTolerance',1e-10);
 
-[w_J, fval_J, exitflag_J] = fmincon(fun_CVaR, x0_J, [],[], Aeq_J, beq_J, lb_J, ub_J, nonlin_volcap, optionsJ);
+[w_J, fval_J, exitflag_J] = fmincon(fun_CVaR, x0, [],[], Aeq, beq, lb, ub, nonlin_volcap, optionsJ);
 
 % Performance of J (in-sample, daily)
 pRet_J = LogRet * w_J;
@@ -677,7 +695,7 @@ port_min = setBounds(port_min, zeros(1,numAssets), 0.25*ones(1,numAssets));
 port_min = setAssetMoments(port_min, ExpRet_ann, CovMatrix_ann);
 
 w_minVarJ = estimateFrontierLimits(port_min, 'min');
-vol_minVarJ = sqrt(w_minVarJ' * CovMatrix_ann * w_minVarJ);
+vol_minVarJ = sqrt(w_minVarJ' * CovMatrix_ann * w_minVarJ)
 
 % Given the in-sample covariance structure and the constraints (full investment, 0 ≤ wᵢ ≤ 0.25), the minimum 
 % variance portfolio already exhibits an annual volatility above 15%. Therefore, a strict volatility cap at 15% 
@@ -686,6 +704,14 @@ vol_minVarJ = sqrt(w_minVarJ' * CovMatrix_ann * w_minVarJ);
 % with the given constraints
 
 %% 4(c) Tail risk (CVaR), Volatility, Max Drawdown – I vs J
+fprintf('\n=== Portfolio I ===\n');
+Tab_I_round = table(nm', round(w_I,4),'VariableNames', {'Asset','Weight'});
+disp(Tab_I_round);
+
+fprintf('\n=== Portfolio J ===\n');
+Tab_J_round = table(nm', round(w_J,4), 'VariableNames', {'Asset','Weight'});
+disp(Tab_J_round);
+
 % Daily returns of portfolios (in-sample)
 pRet_I = LogRet * w_I;
 pRet_J = LogRet * w_J;
@@ -694,8 +720,8 @@ pRet_J = LogRet * w_J;
 VaR_I  = quantile(pRet_I, 1-alpha);
 VaR_J  = quantile(pRet_J, 1-alpha);
 
-CVaR_I = -mean(pRet_I(pRet_I <= VaR_I));
-CVaR_J = -mean(pRet_J(pRet_J <= VaR_J));
+CVaR_I = -mean(pRet_I(pRet_I <= VaR_I))*100; % (percentage)
+CVaR_J = -mean(pRet_J(pRet_J <= VaR_J))*100;
 
 % Equity curves (usa simple returns per performance metrics)
 ret_simple = prices_val(2:end,:) ./ prices_val(1:end-1,:) - 1;   % T-1 x N
@@ -715,15 +741,13 @@ perfTable_IJ = table( ...
     [CVaR_I; CVaR_J], ...
     [annVol_I; annVol_J], ...
     [MaxDD_I; MaxDD_J], ...
-    [annRet_I; annRet_J], ...
-    [Sharpe_I2; Sharpe_J2], ...
-    'VariableNames', {'CVaR_5_daily','AnnVol','MaxDD','AnnRet','Sharpe'}, ...
+    'VariableNames', {'CVaR_5_daily','AnnVol','MaxDD'}, ...
     'RowNames', {'Portfolio I','Portfolio J'});
 
 disp('=== Comparison Portfolio I vs Portfolio J ===');
 disp(perfTable_IJ);
 
-% Plot equity curves (optional)
+% Plot and compare equity curves 
 figure;
 plot(dates(2:end), equity_I, 'LineWidth',1.5); hold on;
 plot(dates(2:end), equity_J, 'LineWidth',1.5);
@@ -744,6 +768,13 @@ end
 %% === Exercise 5 – Personal Strategy ===
 
 %%
+[Vecs,Vals] = eig(CovMatrix_ann);
+lambda      = diag(Vals);                         % eigenvalues (unsorted)
+
+% Sort eigenvalues/eigenvectors in descending order
+[lambda_sorted, idxEV] = sort(lambda, 'descend');
+V_sorted               = Vecs(:, idxEV);
+
 F = V_sorted(:, 1:3);
 sig_f = diag(lambda_sorted(1:3));
 mu = ExpRet_ann';
