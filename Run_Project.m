@@ -20,7 +20,7 @@ nm     = table_prices.Properties.VariableNames(2:end);  % asset names
 myPrice_dt = array2timetable(values, 'RowTimes', dt, 'VariableNames', nm);
 
 % Select in-sample period: 2018–2022
-[prices_val, dates] = selectPriceRange(myPrice_dt, '01/01/2018', '31/12/2022'); 
+[prices_val, ~] = selectPriceRange(myPrice_dt, '01/01/2018', '31/12/2022'); 
 
 %% ====================== 2. Returns and Moments ======================
 
@@ -215,14 +215,14 @@ Sharpe_robust = (Ret_robust - rf) ./ Risk_robust;
 
 % Portfolio C: Robust Minimum-Variance Portfolio
 [~, idxMinVar_rob] = min(Risk_robust);
-wC      = W_OPT_robust(:, idxMinVar_rob);
+w_C      = W_OPT_robust(:, idxMinVar_rob);
 retC    = Ret_robust(idxMinVar_rob);
 riskC   = Risk_robust(idxMinVar_rob);
 sharpeC = Sharpe_robust(idxMinVar_rob);
 
 % Portfolio D: Robust Maximum-Sharpe Portfolio
 [~, idxMaxSharpe_rob] = max(Sharpe_robust);
-wD      = W_OPT_robust(:, idxMaxSharpe_rob);
+w_D      = W_OPT_robust(:, idxMaxSharpe_rob);
 retD    = Ret_robust(idxMaxSharpe_rob);
 riskD   = Risk_robust(idxMaxSharpe_rob);
 sharpeD = Sharpe_robust(idxMaxSharpe_rob);
@@ -252,14 +252,14 @@ fprintf('  Return    : %.4f\n', retC);
 fprintf('  Volatility: %.4f\n', riskC);
 fprintf('  Sharpe    : %.4f\n', sharpeC);
 fprintf('  Weights   :\n');
-disp(wC);
+disp(w_C);
 
 fprintf('Portfolio D – Robust Maximum-Sharpe Portfolio\n');
 fprintf('  Return    : %.4f\n', retD);
 fprintf('  Volatility: %.4f\n', riskD);
 fprintf('  Sharpe    : %.4f\n', sharpeD);
 fprintf('  Weights   :\n');
-disp(wD);
+disp(w_D);
 
 %% === Exercise 2 – Black–Litterman Model ===
 
@@ -855,78 +855,74 @@ end
 %% Selection of a subset of Dates
 [prices_val_validation, dates_validation] = selectPriceRange(myPrice_dt, '01/01/2023', '30/11/2024');
 
-%% Portfolio value and weights over time with semi-annual rebalancing
+%% Portfolio performance with semi-annual rebalancing
 V0 = 100;
 rebalanceMonths = 6;
 
-[ptf_value, weights_time] = simulateRebalancedPortfolio(w_opt_strategy, prices_val_validation, dates_validation, V0, rebalanceMonths);
+OutOfSamplePerformance(w_opt_strategy, prices_val_validation, dates_validation, ...
+    V0, rebalanceMonths, 'Personal Strategy with rebalance', 1, 1, 1);
 
-%% Plot of portfolio value over time with rebalancing
-figure;
-plot(dates_validation, weights_time(:,1), dates_validation, weights_time(:,2), ...
-     dates_validation, weights_time(:,4), dates_validation, weights_time(:,5), ...
-     dates_validation, weights_time(:,12), dates_validation, weights_time(:,16));
-xlabel('Date');
-ylabel('Weight');
-title('Evolution of selected weights w_i(t) with semi-annual rebalancing');
-legend('Asset 1','Asset 2','Asset 4','Asset 5','Asset 12','Asset 16');
-grid on;
-
-%% Performance with rebalancing
-[annRet_sim, annVol_sim, Sharpe_sim, MaxDD_sim, Calmar_sim] = getPerformanceMetrics(ptf_value);
-
-fprintf('--- Portfolio performance ---\n');
-fprintf('Annualized return:         %.4f\n', annRet_sim);
-fprintf('Annualized volatility:     %.4f\n', annVol_sim);
-fprintf('Sharpe ratio:              %.4f\n', Sharpe_sim);
-fprintf('Maximum drawdown:          %.4f\n', MaxDD_sim);
-fprintf('Calmar ratio:              %.4f\n', Calmar_sim);
-
-%% Comparison: portfolio vs individual assets (prices normalized to 100) with rebalancing
-idxAssets = [1 2 5 9 12 16];
-
-% prices normalized to 100 at the first date
-norm_prices = V0 * prices_val_validation(:, idxAssets) ./ prices_val_validation(1, idxAssets);
-
-figure;
-plot(dates_validation, ptf_value, 'LineWidth', 1.5);  % portfolio (starting at 100)
-hold on;
-plot(dates_validation, norm_prices);                  % normalized asset prices
-hold off;
-
-xlabel('Date');
-ylabel('Value (base 100)');
-title('Portfolio vs normalized asset prices');
-legend('Portfolio','Asset 1','Asset 2','Asset 5','Asset 9','Asset 12','Asset 16', ...
-       'Location','best');
-grid on;
-
-%% Portfolio value and weights over time without rebalancing
+%% Portfolio performance without rebalancing
 no_rebalance = Inf;
-[ptf_value_no_rebalance, weights_time_no_rebalance] = simulateRebalancedPortfolio(w_opt_strategy, prices_val_validation, dates_validation, V0, no_rebalance);
-
-%% plot of main weights over time without rebalancing
-figure;
-plot(dates_validation, weights_time_no_rebalance(:,1), dates_validation, weights_time_no_rebalance(:,2), ...
-     dates_validation, weights_time_no_rebalance(:,4), dates_validation, weights_time_no_rebalance(:,5), ...
-     dates_validation, weights_time_no_rebalance(:,12), dates_validation, weights_time_no_rebalance(:,16));
-xlabel('Date');
-ylabel('Weight');
-title('Evolution of selected weights w_i(t) without rebalancing');
-legend('Asset 1','Asset 2','Asset 4','Asset 5','Asset 12','Asset 16');
-grid on;
+OutOfSamplePerformance(w_opt_strategy, prices_val_validation, dates_validation, ...
+    V0, no_rebalance, 'Personal Strategy without rebalance', 0, 0, 1);
 
 %% === Final Discussion ===
 
+%% Rename of weights
+w_A = wMinVar;
+w_B = wMaxSharpe;
+w_E = PortfolioE_BL.weights;
+w_F = PortfolioF_BL.weights;
 
+%%
+ptfLabels = 'A':'J';
+nPortfolios = length(ptfLabels);
 
+W_all = [w_A, w_B, w_C, w_D, w_E, w_F, w_G, w_H, w_I, w_J];
 
+% Flags
+flag_performance_table = 1;
+flag_single_assets     = 0;
+flag_ptf_vs_assets     = 0;
 
+fprintf('\n\n==================== FINAL DISCUSSION ====================\n\n');
+for k = 1:nPortfolios
+    w_k = W_all(:, k);
+    name_ptf_k = sprintf('Portfolio %c', ptfLabels(k));
+    
+    OutOfSamplePerformance( ...
+        w_k, ...
+        prices_val_validation, ...
+        dates_validation, ...
+        V0, ...
+        no_rebalance, ...
+        name_ptf_k, ...
+        flag_performance_table, ...
+        flag_ptf_vs_assets, ...
+        flag_single_assets);
+end
 
+%% Plot asset prices evolution
+norm_prices_validation = 100 * prices_val_validation ./ prices_val_validation(1, :);
 
+figure('Position', [100 100 1200 500]);
+plot(dates_validation, norm_prices_validation, 'LineWidth', 1.2);
+grid on;
 
+xlabel('Date');
+ylabel('Normalized price (base = 100)');
+title('All assets in validation period (normalized to 100 at start)');
 
-
+% If you have asset names in variable "nm", use them in the legend
+if exist('nm', 'var') && numel(nm) == size(prices_val_validation, 2)
+    legend(nm, 'Location', 'bestoutside');
+else
+    % Fallback generic legend
+    nAssets = size(prices_val_validation, 2);
+    legNames = arrayfun(@(i) sprintf('Asset %d', i), 1:nAssets, 'UniformOutput', false);
+    legend(legNames, 'Location', 'bestoutside');
+end
 
 
 
