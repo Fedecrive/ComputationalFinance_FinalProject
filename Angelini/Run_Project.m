@@ -832,7 +832,7 @@ CVaR_I = -mean(pRet_I(pRet_I <= VaR_I))*100; % (percentage)
 CVaR_J = -mean(pRet_J(pRet_J <= VaR_J))*100;
 
 
-% Equity curves (usa simple returns per performance metrics)
+% Equity curves (we use simple returns for performance metrics)
 ret_simple = prices_val(2:end,:) ./ prices_val(1:end-1,:) - 1;   % T-1 x N
 
 equity_I = cumprod(1 + ret_simple * w_I);
@@ -845,7 +845,7 @@ equity_J = 100 * equity_J / equity_J(1);
 [annRet_I, annVol_I, Sharpe_I2, MaxDD_I, Calmar_I] = getPerformanceMetrics(equity_I);
 [annRet_J, annVol_J, Sharpe_J2, MaxDD_J, Calmar_J] = getPerformanceMetrics(equity_J);
 
-% Tabella confronto I vs J
+% Table I vs J
 perfTable_IJ = table( ...
     [CVaR_I; CVaR_J], ...
     [annVol_I; annVol_J], ...
