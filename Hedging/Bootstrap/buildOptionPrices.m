@@ -1,19 +1,24 @@
-function [CallPrices, PutPrices, CallStrikes, PutStrikes, CallexpDates, PutexpDates] = buildOptionPrices(dataFile)
+function [CallPrices, PutPrices, CallStrikes, PutStrikes, ...
+          CallexpDates, PutexpDates, ...
+          CallBid, CallAsk, PutBid, PutAsk] = buildOptionPrices(dataFile)
 % buildOptionPrices
 %   Legge un file CSV di opzioni SPX e restituisce:
 %   - mid prices call / put
 %   - strike call / put
 %   - expiry call / put
+%   - bid/ask call / put
 %
 % Assunto: colonne del CSV sono:
 %   'ASK PRICE', 'BID PRICE', 'OPT STRIKE PRICE', 'exp_date', 'type'
 
-    % Leggo senza far cambiare i nomi a MATLAB
+    % Leggo senza modificare i nomi
     T = readtable(dataFile, 'VariableNamingRule', 'preserve');
 
-    % Mid price
+    % Bid e Ask
     Bid = T.("BID PRICE");
     Ask = T.("ASK PRICE");
+
+    % Mid price
     mid = (Bid + Ask) ./ 2;
 
     % Tipo opzione
@@ -26,22 +31,37 @@ function [CallPrices, PutPrices, CallStrikes, PutStrikes, CallexpDates, PutexpDa
     Strike   = T.("OPT STRIKE PRICE");
     ExpDates = T.exp_date;
 
-    % Estrazione vettori (mantieni tutti i doppioni)
-    CallPrices   = mid(isCall);
-    PutPrices    = mid(isPut);
+    % Prezzi mid
+    CallPrices = mid(isCall);
+    PutPrices  = mid(isPut);
 
-    CallStrikes  = Strike(isCall);
-    PutStrikes   = Strike(isPut);
+    % Strike
+    CallStrikes = Strike(isCall);
+    PutStrikes  = Strike(isPut);
 
+    % Expiry
     CallexpDates = ExpDates(isCall);
     PutexpDates  = ExpDates(isPut);
 
-    % % Forza a colonne
-    % CallPrices   = CallPrices(:);
-    % PutPrices    = PutPrices(:);
-    % CallStrikes  = CallStrikes(:);
-    % PutStrikes   = PutStrikes(:);
-    % CallexpDates = CallexpDates(:);
-    % PutexpDates  = PutexpDates(:);
-end
+    % Bid/Ask delle call
+    CallBid = Bid(isCall);
+    CallAsk = Ask(isCall);
 
+    % Bid/Ask delle put
+    PutBid = Bid(isPut);
+    PutAsk = Ask(isPut);
+
+    % Se vuoi che tutto sia colonna, scommenta:
+    %{
+    CallPrices   = CallPrices(:);
+    PutPrices    = PutPrices(:);
+    CallStrikes  = CallStrikes(:);
+    PutStrikes   = PutStrikes(:);
+    CallexpDates = CallexpDates(:);
+    PutexpDates  = PutexpDates(:);
+    CallBid      = CallBid(:);
+    CallAsk      = CallAsk(:);
+    PutBid       = PutBid(:);
+    PutAsk       = PutAsk(:);
+    %}
+end
