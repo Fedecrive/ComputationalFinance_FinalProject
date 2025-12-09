@@ -272,8 +272,8 @@ CovMatrix_simple_ann = CovMatrix * daysPerYear;
 ExpRet_simple      = mean(Ret);                     
 ExpRet_simple_ann  = ExpRet_simple * daysPerYear;         
 
-% Ritorni medi annualizzati
-fprintf('\n=== Ritorni medi attesi annualizzati (sample) ===\n');
+% Annualized expected returns
+fprintf('\n=== Annualized expected returns (sample) ===\n');
 Tab_ExpRet = table(nm', ExpRet_simple_ann', ...
     'VariableNames', {'Asset','ExpRet_ann'});
 disp(Tab_ExpRet);
@@ -313,7 +313,7 @@ xlabel('Annual Return')
 ylabel('Frequency')
 
 %% b) Introduce the views 
-v   = 3;                           % numero di views
+v   = 3;                           % number of views
 P      = zeros(v, numAssets); 
 q      = zeros(v, 1);        
 Omega  = zeros(v);
