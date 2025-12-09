@@ -724,7 +724,6 @@ fprintf('Annual Sharpe (recomputed): %.4f\n', Sharpe_I_annual_check);
 fprintf('PC1 exposure w''v1         : %.4f\n', w_I' * v1);
 
 
-
 %% 4(b) Portfolio J – Min CVaR_5% with vol cap 15%% and 0<=w<=0.25
 
 alpha = 0.95;            % CVaR at 5% tail
@@ -794,7 +793,7 @@ optionsJ = optimoptions('fmincon','Display','iter','Algorithm','sqp','Constraint
 % Performance of J (in-sample, daily)
 pRet_J = LogRet * w_J;
 VaR_J  = quantile(pRet_J, 1-alpha);
-CVaR_J = -mean(pRet_J(pRet_J <= VaR_J));    % losses positive
+CVaR_J = -mean(pRet_J(pRet_J <= VaR_J));   
 
 ret_J  = ExpRet_ann * w_J;
 vol_J  = sqrt(w_J' * CovMatrix_ann * w_J);
@@ -831,21 +830,14 @@ VaR_J  = quantile(pRet_J, 1-alpha);
 CVaR_I = -mean(pRet_I(pRet_I <= VaR_I))*100; % (percentage)
 CVaR_J = -mean(pRet_J(pRet_J <= VaR_J))*100;
 
-
-% Equity curves (we use simple returns for performance metrics)
-ret_simple = prices_val(2:end,:) ./ prices_val(1:end-1,:) - 1;   % T-1 x N
-
-equity_I = cumprod(1 + ret_simple * w_I);
-equity_J = cumprod(1 + ret_simple * w_J);
-
-equity_I = 100 * equity_I / equity_I(1);
-equity_J = 100 * equity_J / equity_J(1);
+equity_I = [100; 100 * exp(cumsum(pRet_I))];
+equity_J = [100; 100 * exp(cumsum(pRet_J))];
 
 % Performance metrics 
-[annRet_I, annVol_I, Sharpe_I2, MaxDD_I, Calmar_I] = getPerformanceMetrics(equity_I);
-[annRet_J, annVol_J, Sharpe_J2, MaxDD_J, Calmar_J] = getPerformanceMetrics(equity_J);
+[annRet_I, annVol_I, Sharpe_I, MaxDD_I, Calmar_I] = getPerformanceMetrics(equity_I);
+[annRet_J, annVol_J, Sharpe_J, MaxDD_J, Calmar_J] = getPerformanceMetrics(equity_J);
 
-% Table I vs J
+% I vs J table
 perfTable_IJ = table( ...
     [CVaR_I; CVaR_J], ...
     [annVol_I; annVol_J], ...
@@ -856,13 +848,13 @@ perfTable_IJ = table( ...
 disp('=== Comparison Portfolio I vs Portfolio J ===');
 disp(perfTable_IJ);
 
-
-% Plot and compare equity curves 
 figure;
-plot(dates(2:end), equity_I, 'LineWidth',1.5); hold on;
-plot(dates(2:end), equity_J, 'LineWidth',1.5);
-legend('Portfolio I (PCA Max Sharpe)', 'Portfolio J (Min CVaR)');
-xlabel('Date'); ylabel('Equity (base = 100)');
+plot(dates, equity_I, 'LineWidth', 1.5); hold on;
+plot(dates, equity_J, 'LineWidth', 1.5);
+
+legend('Portfolio I (PCA Max Sharpe)', 'Portfolio J (Min CVaR)', 'Location','best');
+xlabel('Date'); 
+ylabel('Equity (base = 100)');
 title('Equity curves – Portfolio I vs Portfolio J');
 grid on;
 
@@ -956,6 +948,54 @@ flag_performance_table = 1;
 flag_single_assets     = 0;
 flag_ptf_vs_assets     = 0;
 
+%%
+
+fprintf('\n\n==================== IN SAMPLE SUMMARY ====================\n\n');
+
+labels = 'A':'J';          
+nPtf   = size(W_all, 2);         
+
+AnnRet  = zeros(nPtf,1);
+AnnVol  = zeros(nPtf,1);
+SharpeR = zeros(nPtf,1);
+MaxDDv  = zeros(nPtf,1);
+CalmarR = zeros(nPtf,1);
+
+for k = 1:nPtf
+
+    L = labels(k);      
+    w = W_all(:, k);    
+
+    % Daily returns
+    pRet = LogRet * w;
+    ptf_value = [100; 100 * exp(cumsum(pRet))];
+
+    % Performance metrics
+    [annRet, annVol, sharpe, maxdd, calmar] = getPerformanceMetrics(ptf_value);
+
+    fprintf('\n--- Portfolio performance (Portfolio %s) ---\n', L);
+    fprintf('Annualized return:      %.4f\n', annRet);
+    fprintf('Annualized volatility:  %.4f\n', annVol);
+    fprintf('Sharpe ratio:           %.4f\n', sharpe);
+    fprintf('Maximum drawdown:       %.4f\n', maxdd);
+    fprintf('Calmar ratio:           %.4f\n', calmar);
+
+    % Save for the table
+    AnnRet(k)  = annRet;
+    AnnVol(k)  = annVol;
+    SharpeR(k) = sharpe;
+    MaxDDv(k)  = maxdd;
+    CalmarR(k) = calmar;
+end
+
+% Summary table
+Portfolio = cellstr(labels'); 
+resultsTable = table(Portfolio, AnnRet, AnnVol, SharpeR, MaxDDv, CalmarR, ...
+    'VariableNames', {'Portfolio','AnnRet','AnnVol','Sharpe','MaxDD','Calmar'});
+
+disp(resultsTable)
+
+%% 
 fprintf('\n\n==================== FINAL DISCUSSION ====================\n\n');
 for k = 1:nPortfolios
     w_k = W_all(:, k);
@@ -993,6 +1033,7 @@ else
     legNames = arrayfun(@(i) sprintf('Asset %d', i), 1:nAssets, 'UniformOutput', false);
     legend(legNames, 'Location', 'bestoutside');
 end
+
 
 
 
