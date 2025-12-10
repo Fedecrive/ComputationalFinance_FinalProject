@@ -9,7 +9,6 @@ addpath('Dati Train')
 addpath('Bootstrap')
 
 %% Get the Data
-
 [CallPrices, PutPrices, CallStrikes, PutStrikes, CallexpDates, PutexpDates, bidCall, askCall, bidPut, askPut] = buildOptionPrices('2017-12-08.csv');
 formatData ='dd/MM/yyyy'; % pay attention to your computer settings
 t0 = datetime('08-Dec-2017');
@@ -24,15 +23,9 @@ end
 % Ordina e rimuove duplicati
 dates = unique(AllExpDates, 'sorted');
 
-
 %% Point 1 - Get Discounts
 [disc, fwd_prices, ExpDates] = bootstrap( ...
     CallPrices, PutPrices, CallStrikes, PutStrikes, CallexpDates, PutexpDates);
-% zero_rates = zeroRates(dates(2:end), disc(2:end),dates(1)); % get zero rates from discounts
-% plot_disc(dates,disc)
-% plot_zerorates(dates,zero_rates)
-
-
 
 %% Step 2 - Additive  parameters calibration
 % Initial guesses
@@ -50,7 +43,6 @@ tic
 dates=[t0; dates];
 toc
 
-
 %% pricing exotic
 timegrid = datetime( ...
     {'08/12/2017', '09/04/2018', '08/08/2018', ...
@@ -63,7 +55,6 @@ fwd = interp1(dates(2:end), fwd_prices, timegrid(end));   % forward alla data fi
 [price] = pricing (Nsim, timegrid, fwd,alpha, eta, kappa, sigma, disc_pricing);
 
 %% hedging
-
 PTFvalue=price;
 rng(42)
 
@@ -77,7 +68,6 @@ yf_C = yearfrac(t0, CallexpDates, 3);
 sigma_call = blsimpv(S0 * ones(nC, 1), CallStrikes, r_C, yf_C, CallPrices, ...
                      'Yield', 0, ...       
                      'Class', 'call');
-
 
 PutDisc = interp1(dates, disc, PutexpDates);
 r_P = getZeroRates(PutDisc, [t0; PutexpDates]);
@@ -94,6 +84,7 @@ sigma_call_bn = max(sigma_call - 0.01, 0);
 
 sigma_put_bp = sigma_put + 0.01;
 sigma_put_bn = max(sigma_put - 0.01, 0);
+
 % --- CALL prices with bumped vols ---
 [C_bp, ~] = blsprice(S0 * ones(nC, 1), CallStrikes, r_C, yf_C, sigma_call_bp, 0);
 [C_bn, ~] = blsprice(S0 * ones(nC, 1), CallStrikes, r_C, yf_C, sigma_call_bn, 0);
@@ -108,21 +99,17 @@ sigma_put_bn = max(sigma_put - 0.01, 0);
 [VegaUpSensitivity,eta_Vega, kappa_Vega, sigma_Vega] = computeVegaUp(fwd, disc_pricing, Nsim, ...
     timegrid, alpha, eta0, k0, sigma0, price, fwd_prices, C_bp, P_bp, CallStrikes, PutStrikes, t0, disc, CallexpDates, PutexpDates, dates);
 
-% eta hedging
-clc
+%% eta hedging
 nCertificate = -1;
 VegaSensitivity = VegaUpSensitivity * nCertificate;
 EtaSensitivity = EtaUpSensitivity*nCertificate;
 
-%
-clc
 [PTFvalue, quantityCallEta, idxCallEta, quantityPut, idxPut,anshFlow, spesaBidAsk] = EtaUpHedging( ...
         PTFvalue, EtaSensitivity, ...
         CallexpDates, PutexpDates, timegrid, askCall, bidCall, askPut, bidPut, alpha, disc, dates, ...
         CallStrikes, PutStrikes, fwd_prices, eta, kappa, sigma, eta_omega, kappa_omega, sigma_omega, t0, 0, 0);
 
-% vega hedging
-clc
+%% vega hedging
 [PTFvalue, quantityCallVega, idxCallVega, quantityPutVega, idxPutVega, cashFlow, spesaBidAsk] = ...
     Vega_hedging(price, VegaSensitivity, ...
                  alpha, CallexpDates, PutexpDates, timegrid, ...
@@ -130,8 +117,8 @@ clc
                  disc, dates, CallStrikes, PutStrikes, fwd_prices, ...
                  eta, kappa, sigma, eta_omega, kappa_omega, sigma_omega, t0, ...
                  CallPrices, PutPrices,eta_Vega, kappa_Vega, sigma_Vega, idxCallEta, quantityCallEta, 0, 0, 0);
-% delta hedgind
-clc
+
+%% delta hedgind
 quantityfwd = deltaHedging( ...
     fwd, disc_pricing, Nsim, timegrid, alpha, eta, kappa, sigma, price, ...
     CallStrikes, CallexpDates, ...
@@ -141,10 +128,7 @@ quantityfwd = deltaHedging( ...
     quantityCallVega, idxCallVega, ...
     quantityPutVega, idxPutVega);
 
-
-
 %%
-
 [fwd_bid, fwd_ask] = findCallPutFwd( ...
     CallexpDates, CallStrikes, bidCall, askCall, ...
     PutexpDates, PutStrikes, bidPut, askPut, disc, ExpDates);
@@ -205,8 +189,6 @@ else
     end
 end
 
-
-
 %% 
 startDate = datetime('2017-12-08','InputFormat','yyyy-MM-dd'); 
 n = 4;                                                 
@@ -226,10 +208,6 @@ fwd_prices_all = ones(length(dates), n);
 fwd_all = ones(n, 1);
 price_certificate_all = ones(n, 1);
 
-Delta_all = ones(n, 1);
-Vega_all = ones(n, 1);
-Omega_all = ones(n, 1);
-
 dates_all(:, 1) = dates;
 disc_all(:, 1) = disc;
 
@@ -240,7 +218,6 @@ ptf_val(1) = liquidity - price + optionsBook(1).quantity * CallPrices(idxCallEta
     + optionsBook(2).quantity * PutPrices(idxPutVega) + optionsBook(2).quantity * CallPrices(idxCallVega);
 
 %%
-
 for i = 2:n
     
     fprintf('\n========== ITERATION %d ==========\n', i);
@@ -287,12 +264,9 @@ for i = 2:n
     PL(i) = ptf_val(i) - ptf_val(i-1);
 
 
-    
-
     nC = length(CallPrices_new);
     nP = length(PutPrices_new);
     S0 = fwd_all(i) * disc_pricing_i(end);
-
 
     CallDisc = interp1([dates_csv(i); dates_all(:, i)], disc_all(:, i), CallexpDates_new);
     r_C = getZeroRates(CallDisc, [dates_csv(i); CallexpDates_new]);
@@ -323,9 +297,6 @@ for i = 2:n
     % --- PUT prices with bumped vols ---
     [~, P_bp] = blsprice(S0 * ones(nP, 1), PutStrikes_new, r_P, yf_P, sigma_put_bp, 0);
     [~, P_bn] = blsprice(S0 * ones(nP, 1), PutStrikes_new, r_P, yf_P, sigma_put_bn, 0);
-
-
-
 
 
 
@@ -412,17 +383,6 @@ for i = 2:n
     PutexpDates = PutexpDates_new;
 end
 
-%%
-dates_all = [dates_csv'; dates_all];
-
-%%
-
 eta_all
 kappa_all
 sigma_all
-
-Delta_all
-Vega_all
-Omega_all
-
-%%

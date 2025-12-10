@@ -2,6 +2,23 @@ function [eta, kappa, sigma, MSE, pricesMkt_C, pricesMkt_P] = calibration( ...
     CallPrices, PutPrices, CallStrikes, PutStrikes, fwdPrices, t0, disc, ...
     alpha, eta0, k0, sigma0, CallexpDates, PutexpDates, dates)
 
+% Percentage to keep
+p = 0.30;
+
+% Random mask that keeps p percent of the elements
+maskCall = rand(length(CallexpDates), 1) < p;
+maskPut = rand(length(PutexpDates), 1) < p;
+
+% Apply mask to all aligned CALL vectors
+CallPrices   = CallPrices(maskCall);
+CallStrikes  = CallStrikes(maskCall);
+CallexpDates = CallexpDates(maskCall);
+
+% Apply mask to all aligned PUT vectors
+PutPrices   = PutPrices(maskPut);
+PutStrikes  = PutStrikes(maskPut);
+PutexpDates = PutexpDates(maskPut);
+
 if alpha == 0
     L_fun = @(u, t, eta, kappa, sigma) ...
         exp(-t./kappa .* log(1 + kappa .* u .* sigma.^2));
@@ -19,28 +36,18 @@ phi_fun = @(u, t, eta, kappa, sigma) ...
 M = 15;    % Grid size parameter
 dz = 0.01; % Grid spacing
 
-
-
-
-
 pricesModel = {}; % Cell array to store model price functions
 pricesMkt   = []; % Vector to store normalized market prices
-
 
 % Loop through maturities (skipping the first one)
 for i = 1:length(CallexpDates)
     
     idx = find(dates == CallexpDates(i));
 
-
     mon = log(fwdPrices(idx)./CallStrikes(i));
 
     % Select only valid call and put options that are out-of-the-money
     if ~isnan(CallPrices(i)) && mon < 0 && mon > -0.5 && year(CallexpDates(i))~=2017 && year(CallexpDates(i))~=2018
-    
-    
-    
-    
 
         disc_i = disc(idx+1);                  % Discount factor for this maturity
         ttm_i  = yearfrac(t0, dates(idx), 3);  % Maturity in anni
@@ -48,7 +55,6 @@ for i = 1:length(CallexpDates)
         % Call: vettore lunghezza sum(maskCall)
         pricesModel{end+1} = @(eta, kappa, sigma) ...
             PriceCallOption(CallStrikes(i),fwdPrices(idx),disc_i,@(u)phi_fun(u,ttm_i,eta,kappa,sigma),M,dz,a);
-    
     
         % Market prices (stessa logica: solo opzioni selezionate)
         pricesMkt = [pricesMkt, CallPrices(i)];
@@ -60,34 +66,27 @@ pricesMkt_C = pricesMkt;
 
 for i = 1:length(PutexpDates)
     
-
    idx = find(dates==PutexpDates(i));
-
 
     mon = log(fwdPrices(idx)./PutStrikes(i));
 
     % Select only valid call and put options that are out-of-the-money
-    if ~isnan(PutPrices(i)) && mon > 0 && mon < 0.5 && year(CallexpDates(i))~=2017 && year(CallexpDates(i))~=2018
+    if ~isnan(PutPrices(i)) && mon > 0 && mon < 0.5 && year(PutexpDates(i))~=2017 && year(PutexpDates(i))~=2018
     
-    
-    
-    
-
         disc_i = disc(idx+1);                  % Discount factor for this maturity
         ttm_i  = yearfrac(t0, dates(idx), 3);  % Maturity in anni
     
         % Call: vettore lunghezza sum(maskCall)
         pricesModel{end+1} = @(eta, kappa, sigma) ...
             PriceCallOption(PutStrikes(i),fwdPrices(idx),disc_i,@(u)phi_fun(u,ttm_i,eta,kappa,sigma),M,dz,a)-disc_i*(fwdPrices(idx)-PutStrikes(i));
-    
-    
+
         % Market prices (stessa logica: solo opzioni selezionate)
         pricesMkt = [pricesMkt, PutPrices(i)];
         
     end
 end
 
-pricesMkt_P = pricesMkt((length(CallexpDates) + 1):end);
+pricesMkt_P = pricesMkt((length(PutexpDates) + 1):end);
 
 %% ===== Dopo il ciclo sulle maturities =====
 
@@ -113,7 +112,6 @@ opts = optimoptions('fmincon', ...
     'MaxIterations', 200, ...
     'OptimalityTolerance', 1e-12, ...
     'StepTolerance', 1e-5);
-
 
 % Calibrazione
 [par, ~] = fmincon(objective, x0, [], [], [], [], lb, ub, [], opts);
