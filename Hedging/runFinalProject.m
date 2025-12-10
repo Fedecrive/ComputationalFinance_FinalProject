@@ -8,6 +8,7 @@ addpath('Functions')
 addpath('Dati Train')
 addpath('Bootstrap')
 
+
 %% Get the Data
 [CallPrices, PutPrices, CallStrikes, PutStrikes, CallexpDates, PutexpDates, bidCall, askCall, bidPut, askPut] = buildOptionPrices('2017-12-08.csv');
 formatData ='dd/MM/yyyy'; % pay attention to your computer settings
@@ -221,8 +222,10 @@ ptf_val(1) = liquidity - price + optionsBook(1).quantity * CallPrices(idxCallEta
 for i = 2:n
     
     fprintf('\n========== ITERATION %d ==========\n', i);
+
     d = interp1([dates_csv(i-1); dates_all(:, i-1)], disc_all(:, i-1), dates_csv(i));
     liquidity = liquidity / d;
+
     [CallPrices_new, PutPrices_new, CallStrikes_new, PutStrikes_new, CallexpDates_new, ...
         PutexpDates_new, bidCall_new, askCall_new, bidPut_new, askPut_new] = buildOptionPrices(files_csv(i));
     
@@ -263,6 +266,9 @@ for i = 2:n
 
     PL(i) = ptf_val(i) - ptf_val(i-1);
 
+    optionsBook(1).quantity
+    optionsBook(2).quantity
+    optionsBook(3).quantity
 
     nC = length(CallPrices_new);
     nP = length(PutPrices_new);
