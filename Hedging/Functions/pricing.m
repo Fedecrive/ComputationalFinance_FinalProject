@@ -1,6 +1,7 @@
-function [price]=pricing (Nsim, timegrid, fwd,alpha, eta, kappa, sigma, disc)
-underlyingMatrix=zeros(Nsim, length(timegrid));
-underlyingMatrix(:,1)=fwd*ones(Nsim,1); %fwd relativo alla scadenza finale
+function [price] = pricing (Nsim, timegrid, fwd,alpha, eta, kappa, sigma, disc)
+
+underlyingMatrix = zeros(Nsim, length(timegrid));
+underlyingMatrix(:,1) = fwd * ones(Nsim,1); %fwd relativo alla scadenza finale
 if alpha == 0
     L_fun = @(u, t) ...
         exp(-t./kappa .* log(1 + kappa .* u .* sigma.^2));
@@ -18,14 +19,14 @@ phi_fun = @(u, t) ...
 M = 15;    % Grid size parameter
 dz = 0.01; % Grid spacing
 for i=2:length(timegrid)
-    underlyingMatrix(:,i)=underlyingMatrix(:,i-1).*exp(SimulateFromCF(@(u)phi_fun(u,yearfrac(timegrid(i-1),timegrid(i),3)),M,dz,a,Nsim));
+    underlyingMatrix(:,i) = underlyingMatrix(:,i-1).*exp(SimulateFromCF(@(u)phi_fun(u,yearfrac(timegrid(i-1),timegrid(i),3)),M,dz,a,Nsim));
     %SimulateFromCF(@(u)phi_fun(u,yearfrac(timegrid(i-1),timegrid(i),3)),M,dz,a,Nsim)
 
 end
 
 % trasformazione matrice dei fwd in matrice degli spot
 for i=1:length(timegrid)
-    underlyingMatrix(:,i)=underlyingMatrix(:,i)*disc(end)/disc(i);
+    underlyingMatrix(:,i) = underlyingMatrix(:,i) * disc(end) / disc(i);
 end
 
 % ==============================

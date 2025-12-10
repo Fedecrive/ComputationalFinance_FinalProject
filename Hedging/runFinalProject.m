@@ -8,7 +8,6 @@ addpath('Functions')
 addpath('Dati Train')
 addpath('Bootstrap')
 
-
 %% Get the Data
 [CallPrices, PutPrices, CallStrikes, PutStrikes, CallexpDates, PutexpDates, bidCall, askCall, bidPut, askPut] = buildOptionPrices('2017-12-08.csv');
 formatData ='dd/MM/yyyy'; % pay attention to your computer settings
@@ -33,15 +32,14 @@ dates = unique(AllExpDates, 'sorted');
 k0     = 1;
 eta0   = 0;
 sigma0  = 0.2;    
-start=1;
 alpha=0;
 last=length(dates)-2;
 
 tic
-[eta, kappa, sigma, MSE, pricesMkt_C, pricesMkt_P] = calibration( ...
+[eta, kappa, sigma, RMSE, MAPE] = calibration_with_metrics( ...
     CallPrices, PutPrices, CallStrikes, PutStrikes, fwd_prices, t0, disc, ...
     alpha, eta0, k0, sigma0, CallexpDates, PutexpDates, dates);
-dates=[t0; dates];
+dates = [t0; dates];
 toc
 
 %% pricing exotic
@@ -105,13 +103,13 @@ nCertificate = -1;
 VegaSensitivity = VegaUpSensitivity * nCertificate;
 EtaSensitivity = EtaUpSensitivity*nCertificate;
 
-[PTFvalue, quantityCallEta, idxCallEta, quantityPut, idxPut,anshFlow, spesaBidAsk] = EtaUpHedging( ...
+[~, quantityCallEta, idxCallEta, quantityPut, idxPut,anshFlow, ~] = EtaUpHedging( ...
         PTFvalue, EtaSensitivity, ...
         CallexpDates, PutexpDates, timegrid, askCall, bidCall, askPut, bidPut, alpha, disc, dates, ...
         CallStrikes, PutStrikes, fwd_prices, eta, kappa, sigma, eta_omega, kappa_omega, sigma_omega, t0, 0, 0);
 
 %% vega hedging
-[PTFvalue, quantityCallVega, idxCallVega, quantityPutVega, idxPutVega, cashFlow, spesaBidAsk] = ...
+[PTFvalue, quantityCallVega, idxCallVega, quantityPutVega, idxPutVega, cashFlow, ~] = ...
     Vega_hedging(price, VegaSensitivity, ...
                  alpha, CallexpDates, PutexpDates, timegrid, ...
                  askCall, bidCall, askPut, bidPut, ...
@@ -132,7 +130,7 @@ quantityfwd = deltaHedging( ...
 %%
 [fwd_bid, fwd_ask] = findCallPutFwd( ...
     CallexpDates, CallStrikes, bidCall, askCall, ...
-    PutexpDates, PutStrikes, bidPut, askPut, disc, ExpDates);
+    PutexpDates, PutStrikes, bidPut, askPut, disc, ExpDates, fwd);
 
 %% Preallocate struct array for options
 optionsBook = repmat(struct( ...
@@ -190,6 +188,12 @@ else
     end
 end
 
+if quantityfwd >= 0 
+    liquidity = liquidity - quantityfwd * fwd_ask;
+else
+    liquidity = liquidity - quantityfwd * fwd_bid;
+end
+
 %% 
 startDate = datetime('2017-12-08','InputFormat','yyyy-MM-dd'); 
 n = 4;                                                 
@@ -202,6 +206,10 @@ end
 eta_all = eta0 * ones(n, 1);
 kappa_all = k0 * ones(n, 1);
 sigma_all = sigma0 * ones(n, 1);
+
+eta_all(1) = eta;
+kappa_all(1) = kappa;
+sigma_all(1) = sigma;
 
 dates_all = NaT(length(dates), n);
 disc_all = ones(length(dates) + 1, n);
@@ -216,7 +224,7 @@ PL = zeros(n, 1);
 ptf_val = zeros(n, 1);
 
 ptf_val(1) = liquidity - price + optionsBook(1).quantity * CallPrices(idxCallEta) + ...
-    + optionsBook(2).quantity * PutPrices(idxPutVega) + optionsBook(2).quantity * CallPrices(idxCallVega);
+    + optionsBook(2).quantity * PutPrices(idxPutVega) + optionsBook(2).quantity * CallPrices(idxCallVega) + quantityfwd * (fwd_ask + fwd_bid) / 2;
 
 %%
 for i = 2:n
@@ -262,7 +270,8 @@ for i = 2:n
         CallStrikes_new, PutStrikes_new, CallexpDates_new, PutexpDates_new);
 
     ptf_val(i) = liquidity - price_certificate_all(i) + optionsBook(1).quantity * CallPrices_new(idxopt1) + ...
-        + optionsBook(2).quantity * PutPrices_new(idxopt2) + optionsBook(2).quantity * CallPrices_new(idxopt3);
+        + optionsBook(2).quantity * PutPrices_new(idxopt2) + optionsBook(2).quantity * CallPrices_new(idxopt3) + ...
+        fwd_all(i) * quantityfwd;
 
     PL(i) = ptf_val(i) - ptf_val(i-1);
 
@@ -338,9 +347,24 @@ for i = 2:n
                      CallPrices_new, PutPrices_new, eta_Vega, kappa_Vega, sigma_Vega, idxCallEta, ...
                      quantityCallEta, 1, idxopt3, idxopt2);
 
-    q1 = quantityCallEta - optionsBook(1).quantity;
-    q2 = quantityPutVega - optionsBook(2).quantity;
-    q3 = quantityCallVega - optionsBook(3).quantity;
+    % delta hedgind
+    quantityfwd_i = deltaHedging( ...
+        fwd_all(i), disc_pricing_i, Nsim, timegrid_i, alpha, eta_all(i), kappa_all(i), sigma_all(i), price_certificate_all(i), ...
+        CallStrikes_new, CallexpDates_new, ...
+        PutStrikes_new, PutexpDates_new, ...
+        [dates_csv(i); dates_all(:, i)], fwd_prices_all(:, i), disc_all(:, i), dates_csv(i), ...
+        quantityCallEta, idxCallEta, ...
+        quantityCallVega, idxCallVega, ...
+        quantityPutVega, idxPutVega);
+
+    [fwd_bid, fwd_ask] = findCallPutFwd( ...
+        CallexpDates_new, CallStrikes_new, bidCall_new, askCall_new, ...
+        PutexpDates_new, PutStrikes_new, bidPut_new, askPut_new, disc_all(:, i), ExpDates, fwd_all(i));
+
+    q1 = quantityCallEta - optionsBook(1).quantity
+    q2 = quantityPutVega - optionsBook(2).quantity
+    q3 = quantityCallVega - optionsBook(3).quantity
+    q4 = quantityfwd_i - quantityfwd
 
     if idxopt1 ~= idxopt3
         if q1 > 0 
@@ -376,10 +400,17 @@ for i = 2:n
 
     end
 
-    optionsBook(1).quantity = optionsBook(1).quantity + q1;
-    optionsBook(2).quantity = optionsBook(2).quantity + q2;
-    optionsBook(3).quantity = optionsBook(3).quantity + q3;
+    if quantityfwd >= 0 
+        liquidity = liquidity - quantityfwd * fwd_ask;
+    else
+        liquidity = liquidity - quantityfwd * fwd_bid;
+    end
 
+
+    optionsBook(1).quantity = optionsBook(1).quantity + q1
+    optionsBook(2).quantity = optionsBook(2).quantity + q2
+    optionsBook(3).quantity = optionsBook(3).quantity + q3
+    quantityfwd = quantityfwd_i
 
     CallPrices = CallPrices_new;
     PutPrices = PutPrices_new;

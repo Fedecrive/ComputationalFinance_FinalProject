@@ -3,7 +3,7 @@ function [eta, kappa, sigma, MSE, pricesMkt_C, pricesMkt_P] = calibration( ...
     alpha, eta0, k0, sigma0, CallexpDates, PutexpDates, dates)
 
 % Percentage to keep
-p = 0.50;
+p = 0.30;
 
 % Random mask that keeps p percent of the elements
 maskCall = rand(length(CallexpDates), 1) < p;
@@ -47,7 +47,7 @@ for i = 1:length(CallexpDates)
     mon = log(fwdPrices(idx)./CallStrikes(i));
 
     % Select only valid call and put options that are out-of-the-money
-    if ~isnan(CallPrices(i)) && mon < 0 && mon > -0.5 && year(CallexpDates(i))~=2017 && year(CallexpDates(i))~=2018
+    if ~isnan(CallPrices(i)) && mon < 0 && mon > -0.5 && year(CallexpDates(i))~=2017
 
         disc_i = disc(idx+1);                  % Discount factor for this maturity
         ttm_i  = yearfrac(t0, dates(idx), 3);  % Maturity in anni
@@ -136,6 +136,6 @@ if numel(modelPricesOpt) ~= numel(marketPrices)
 end
 
 residuals = modelPricesOpt(:) - marketPrices(:);
-MSE       = mean(abs(residuals));
+MSE       = mean(residuals.^2);
 
 end
