@@ -1034,8 +1034,34 @@ else
     legend(legNames, 'Location', 'bestoutside');
 end
 
+%% Portfolio performance 2025
+clc
 
+prices_2025  = readtable('asset_prices_out_of_sample.csv');
 
+% Transform prices from table to timetable
+dt     = prices_2025{:,1};
+values = prices_2025{:,2:end};
+nm     = prices_2025.Properties.VariableNames(2:end);  % asset names
 
+myPrice_2025 = array2timetable(values, 'RowTimes', dt, 'VariableNames', nm);
 
+% Select out_of-sample period: 2025
+[prices_val_2025, dates_2025] = selectPriceRange(myPrice_2025, '01/01/2025', '31/12/2025');
 
+% Performance metrics
+OutOfSamplePerformance(w_opt_strategy, prices_val_2025, dates_2025, ...
+   V0, rebalanceMonths, 'Personal Strategy - 2025 OOS', 1, 1, 0);
+
+% Comparison with equally weighted ptf
+w_EW = ones(numAssets,1) / numAssets;
+OutOfSamplePerformance(w_EW, prices_val_2025, dates_2025, ...
+    V0, rebalanceMonths, 'EW - 2025 OOS', 1, 1, 0);
+
+% Comparison with Min Var ptf
+OutOfSamplePerformance(w_A, prices_val_2025, dates_2025, ...
+    V0, rebalanceMonths, 'MVP - 2025 OOS', 1, 1, 0);
+
+%comparison with max Sharpe Ratio ptf
+OutOfSamplePerformance(w_B, prices_val_2025, dates_2025, ...
+    V0, rebalanceMonths, 'MSR - 2025 OOS', 1, 1, 0);
