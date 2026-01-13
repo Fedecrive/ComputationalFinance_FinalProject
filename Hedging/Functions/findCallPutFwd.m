@@ -11,6 +11,8 @@ function [fwd_bid, fwd_ask] = findCallPutFwd( ...
                     PutexpDates,  PutStrikes,  PutBid, PutAsk);
 
     % Interpolate discount factor ON matched expiries
+    ExpDates
+    disc(2:end)
     disc_interp = interp1(ExpDates, disc(2:end), CallexpDatesMatched);
 
     % fwd_ask = min((CallAskMatched - PutBidMatched) ./ disc_interp + CallStrikesMatched); 

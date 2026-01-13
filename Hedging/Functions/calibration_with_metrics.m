@@ -3,7 +3,7 @@ function [eta, kappa, sigma, RMSE, MAPE] = calibration_with_metrics( ...
     alpha, eta0, k0, sigma0, CallexpDates, PutexpDates, dates)
 
 % Percentage to keep
-p = 0.30;
+p = 0.10;
 
 % Random mask that keeps p percent of the elements
 maskCall = rand(length(CallexpDates), 1) < p;
