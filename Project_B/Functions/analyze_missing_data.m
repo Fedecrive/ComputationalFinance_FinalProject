@@ -1,14 +1,5 @@
-function miss = p2_missing_data_analysis(F, seriesNames, doPlot)
-%P2_MISSING_DATA_ANALYSIS Prints NaN count and optionally plots NaN map.
-%
-% Inputs:
-%   F           (T x N) data matrix (e.g., prices)
-%   seriesNames (1 x N) names for printing
-%   doPlot      logical
-%
-% Output:
-%   miss struct with fields:
-%     .nanCount, .nanRatio
+function miss = analyze_missing_data(F, seriesNames, doPlot)
+%ANALYZE_MISSING_DATA Prints NaN count and optionally plots NaN map.
 
     if nargin < 3, doPlot = false; end
 

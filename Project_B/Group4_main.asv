@@ -7,35 +7,32 @@ addpath("Functions");
 addpath("PCA");
 addpath("Pricing Chooser");
 
-%%
+%% Group4_main.m (clean structure)
+
+addpath(genpath("Functions"));
+
 opts = struct();
 opts.doPlots = true;
 opts.maxLag  = 20;
 opts.nMonths = 24;
 
-%% Load + clean + base objects
-warning('off','all');
-
+%% =========================
+% COMMON: Load + clean + base objects
+% =========================
 DATA = load_power_futures_data("power_DE_FR.csv", opts);
 
-% Legacy variables (used later in Exercises 3-5)
-T             = DATA.T_clean;
-toRemove      = DATA.toRemove;
-dates         = DATA.dates;
-F             = DATA.F;
-legend_labels = DATA.legendLabels;
-contractNames = DATA.seriesNames;
-
 % Missing data report on the plotted matrix (F)
-MISS = analyze_missing_data(F, contractNames, opts.doPlots);
+MISS = analyze_missing_data(DATA.F, DATA.seriesNames, opts.doPlots);
 
 % Contract log-returns (used in Exercise 1 diagnostics + PCA masking etc.)
-[RET_contracts, datesR] = compute_log_returns(T);
-DIAG_contracts = compute_return_diagnostics(RET_contracts, contractNames, datesR);
+[RET_contracts, datesR] = compute_log_returns(DATA.T_clean);
+DIAG_contracts = compute_return_diagnostics(RET_contracts, DATA.seriesNames, datesR);
 
-%% Exercise 1 - contracts analysis
+%% =========================
+% EXERCISE 1 (contracts analysis)
+% =========================
 E1 = struct();
-E1.toRemove = toRemove;
+E1.toRemove = DATA.toRemove;          % used later in PCA pipeline
 E1.R        = RET_contracts;
 E1.datesR   = datesR;
 E1.stats    = DIAG_contracts.stats;
@@ -45,15 +42,14 @@ E1.C        = DIAG_contracts.C;
 E1.corr_w   = DIAG_contracts.corr_w;
 E1.corr_m   = DIAG_contracts.corr_m;
 
-% Attach returns to diagnostics for plotting (normality/ACF)
-DIAG_contracts.R = RET_contracts;
-
-%% Exercise 2 - monthly forward curve reconstruction + analysis
-CURVES = build_monthly_forward_curves(T, opts.nMonths);
+%% =========================
+% EXERCISE 2 (monthly forward curve reconstruction + analysis)
+% =========================
+CURVES = build_monthly_forward_curves(DATA.T_clean, opts.nMonths);
 
 X_DE = CURVES.X_DE;
 X_FR = CURVES.X_FR;
-X    = [X_DE X_FR];
+X    = [X_DE X_FR];                   % used later in Exercise 3 PCA
 
 % Monthly forward returns diagnostics (DE/FR separately)
 R_X_DE = diff(log(X_DE)); R_X_DE(~isfinite(R_X_DE)) = NaN;
@@ -74,15 +70,25 @@ E2.R_X_FR = R_X_FR;
 E2.stats_DE = DIAG_X_DE.stats;
 E2.stats_FR = DIAG_X_FR.stats;
 
+%% =========================
+% OPTIONAL PLOTS (all in one place)
+% =========================
 if opts.doPlots
     FIG = make_exploratory_plots(DATA, DIAG_contracts, CURVES, opts);
 end
 
-warning('on','all');
-[datesDisc, discounts] = load_discount_factors("discount_factors.xlsx");
+%% =========================
+% Variables needed by later exercises (3-5)
+% =========================
+% X_DE, X_FR, X already defined above.
+% toRemove already in DATA.toRemove.
+
+% If you want discount factors as common too:
+% [datesDisc, discounts] = load_discount_factors("discount_factors.xlsx");
+
 
 %% Exercise 3 - Principal Component Analysis
-X = [X_DE X_FR];
+X=[X_DE X_FR];
 
 Ret = buildReturnsPCA(X, toRemove, T);
 plotHistWithNormalFit(Ret);
